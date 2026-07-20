@@ -1,0 +1,32 @@
+[
+  {
+    "started": "2026-04-28 16:39:10",
+    "python": "3.12.3",
+    "numpy": "2.4.4",
+    "pandas": "2.3.2",
+    "outdir": "/home/khuram/venvs/qchem/hubbard_gme/src/hubbard_gme/data_for_ML",
+    "command": "ml_generate_ml_dataset.py --L 3 4 5 6 --scan-mode both --modes uniform --n-outer-restarts 3 --n-workers 15",
+    "n_workers": 15,
+    "logged_at": "2026-04-28 16:39:10"
+  },
+  {
+    "started": "2026-04-28 19:15:50",
+    "python": "3.12.3",
+    "numpy": "2.4.4",
+    "pandas": "2.3.2",
+    "outdir": "/home/khuram/venvs/qchem/hubbard_gme/src/hubbard_gme/data_for_ML",
+    "command": "ml_generate_ml_dataset.py --L 5 --scan-mode both --modes uniform --n-outer-restarts 3 --n-workers 4",
+    "n_workers": 4,
+    "logged_at": "2026-04-28 19:15:50"
+  },
+  {
+    "started": "2026-05-25 15:55:43",
+    "python": "3.12.3",
+    "numpy": "2.4.4",
+    "pandas": "2.3.2",
+    "outdir": "/home/khuram/venvs/qchem/hubbard_gme/src/hubbard_gme/data_for_ML",
+    "command": "ml_generate_ml_dataset.py --L 6 --scan-mode both --modes uniform --n-outer-restarts 3 --n-workers 15",
+    "n_workers": 15,
+    "logged_at": "2026-05-25 15:55:43"
+  }
+]

@@ -1,0 +1,563 @@
+\documentclass[11pt]{article}
+
+% ---------------------------------------------------------------------------
+%  Data-generation report for the Hubbard-GME ML dataset (gme_qml project)
+%  Compile:  pdflatex data_generation_report.tex   (run twice for refs/TOC)
+% ---------------------------------------------------------------------------
+
+\usepackage[a4paper,margin=2.3cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage{fancyvrb}
+
+\newcommand{\code}[1]{\texttt{\small #1}}
+\newcommand{\CGME}{\ensuremath{C_{\mathrm{GME}}}}
+\newcommand{\rdm}{\ensuremath{\Gamma^{(n)}}}
+
+\title{\textbf{Data Generation, Schema, and Auditing}\\[2pt]
+       \large Machine-Learning Dataset for Genuine Multipartite Entanglement\\
+       in the 1-D Hubbard Model (\code{gme\_qml} project)}
+\author{Hubbard-GME project}
+\date{\today}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\bigskip
+
+% ===========================================================================
+\section{Purpose and scope}
+% ===========================================================================
+The genuine-multipartite-entanglement measure \CGME{} of an $n$-body reduced
+density matrix (RDM) $\rdm$ of the Hubbard model is computed by a convex-roof
+optimisation, which is accurate but expensive (seconds to minutes per mixed
+RDM, hours per parameter sweep). The \code{gme\_qml} project trains machine-learning
+surrogates that predict \CGME{} directly from $\rdm$. This report documents:
+\begin{enumerate}[nosep]
+  \item how the training data is \emph{generated} (Section~\ref{sec:gen}),
+  \item what \emph{type} of data and \emph{every field} that is stored
+        (Section~\ref{sec:schema}),
+  \item how the dataset is \emph{audited} for quality (Section~\ref{sec:audit}),
+  \item the \emph{commands} that produce and check the dataset
+        (Section~\ref{sec:commands}),
+  \item the \emph{memory} required as a function of $n$ and $L$
+        (Section~\ref{sec:memory}).
+\end{enumerate}
+
+Two supervised tasks are targeted:
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+Task & Type & Target \\
+\midrule
+Detection  & binary classification & is \CGME{}$>\varepsilon$ ? \\
+Estimation & regression            & the value of \CGME{} \\
+\bottomrule
+\end{tabular}
+\end{center}
+The ground truth is the verified \textbf{GCG} (Generalised Conjugate Gradient)
+convex-roof solver.
+
+% ===========================================================================
+\section{Data-generation pipeline}\label{sec:gen}
+% ===========================================================================
+
+\subsection{Physics engine (ground truth)}
+For a chosen Hamiltonian $(L, N_e, U, t, \text{mode}, \text{sector})$:
+\begin{enumerate}[nosep]
+  \item Build the Hubbard Hamiltonian and diagonalise it (Sz$=0$ sector by
+        default, or the full $N_e$-electron space with \code{-{}-full-hamiltonian}).
+  \item For each eigenstate $\psi_m$ and body order $n$, form the $n$-body RDM
+        $\rdm[\psi_m]$ (cluster-averaged over contiguous site clusters for $n<L$).
+  \item Combine states as needed: ground state ($T=0$) or a Boltzmann mixture
+        $\rdm(T)=\sum_m p_m(T)\,\rdm[\psi_m]$ for thermal data.
+  \item Label each RDM with \CGME{} via the GCG convex roof.
+\end{enumerate}
+
+\subsection{The RDM bank: the reusable primitive}
+The object $\{\rdm[\psi_m]\}$ for \emph{all} eigenstates and all $n$ is the
+\emph{RDM bank}. It depends \emph{only} on the Hamiltonian and sector --- not on
+temperature, solver, or task --- so it is computed \textbf{once} per
+$(L,N_e,U,t,\text{mode},\text{sector})$ and cached in
+\code{results/rdm\_pkl\_results/rdm\_bank/}. Every later analysis (ground state,
+thermal, ML labelling) reuses it, avoiding re-diagonalisation. To keep the peak
+memory independent of the number of worker processes, the eigenvectors are
+shared across workers by fork copy-on-write rather than pickled per worker.
+
+\subsection{Two ways to obtain labelled records}
+\paragraph{(A) Native generator \code{ml\_generate\_ml\_dataset.py}.}
+Sweeps $(L,\,U/t \text{ or } t,\,\text{state},\,\text{cluster})$, diagonalises
+once per configuration, and emits one record per RDM. Sampling of $U/t$ is
+\emph{stratified}: $\sim$25\,\% weak coupling (log-spaced), $\sim$50\,\% in the
+crossover $U/t\in[3,10]$ (linear-dense), $\sim$25\,\% strong coupling
+(log-spaced), so the physically interesting crossover is oversampled. This
+generator labels with the \textbf{Stiefel} solver and stores rich state features
+(spin, energy). It is kept for reference but is \emph{not} the GCG dataset.
+
+\paragraph{(B) GCG builder \code{ml\_ingest\_pkls.py}.}
+Produces the \textbf{GCG-only} dataset with three sources:
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\code{-{}-source} & RDM $\rho$ from & Label \CGME{} \\
+\midrule
+\code{gme}     & linked \code{rdm\_cache/} RDM       & existing \code{C\_gcg} in the GME PKL \\
+\code{surface} & reconstructed from the bank + $p_m(T)$ & existing \code{C\_surface}$[n][t,T]$ \\
+\code{banks}   & bank RDM ($T{=}0$ GS, or $T{>}0$ mixed) & \textbf{GCG run now} on that $\rho$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+\code{gme} and \code{surface} \emph{convert} already-labelled results; \code{banks}
+\emph{generates} new labels by running GCG on the banks' RDMs and is the way to
+scale the dataset across $L$, $t$, $U$, and $T$. Only the GCG value is used ---
+Stiefel results are never ingested and no Stiefel-named field is written.
+
+\subsection{Storage layout}
+General, reusable artifacts live under \code{results/rdm\_pkl\_results/}; the ML
+dataset lives under \code{gme\_qml/data\_for\_ML/}.
+\begin{Verbatim}[fontsize=\small]
+results/rdm_pkl_results/
+  rdm_bank/     rdmbank_..._{sz0|full}_...pkl   general RDM banks (per Hamiltonian)
+  gme_runs/     standalone T=0 GME solver results (bounds + per-k/per-restart logs)
+  thermal_runs/ thermal / surface results + per-grid-point checkpoints
+  rdm_cache/    single RDMs; state_cache/ diagonalised states
+
+gme_qml/data_for_ML/
+  records/      native (Stiefel) records + manifest.csv
+  ingested/     GCG dataset: records/*.npz + manifest.csv   <-- used for GCG training
+\end{Verbatim}
+
+% ===========================================================================
+\section{What is stored: record schema}\label{sec:schema}
+% ===========================================================================
+Each record is one \code{.npz} file (arrays + config) plus one row in
+\code{manifest.csv} (scalar summary for fast filtering). The complete field list
+is in \code{data\_dictionary.csv}; the tables below group every field by
+category. Column \emph{Dataset} indicates where the field appears: \emph{native}
+(Stiefel), \emph{gcg} (ingested), or \emph{both}.
+
+\paragraph{Record file (\code{.npz}) arrays.}
+\code{rho\_real}, \code{rho\_imag} ($2^n\times2^n$, \code{float32}) --- the RDM;
+\code{eigvals}; \code{config\_json}; and the scalar labels listed under
+``GME label'' below. The GCG records add \code{source}, \code{solver},
+\code{T}, \code{thermal}.
+
+\subsection{System / Hamiltonian fields}
+\begin{longtable}{@{}p{2.4cm}p{1.6cm}p{9.3cm}@{}}
+\toprule
+Field & Dataset & Description \\ \midrule \endhead
+\code{L}            & both   & Number of lattice sites \\
+\code{t}            & both   & Hopping amplitude \\
+\code{U}            & both   & On-site Coulomb interaction \\
+\code{U\_over\_t}   & both   & Coupling ratio $U/t$ \\
+\code{mode}         & both   & Topology (uniform/open/nnn/ssh/ladder) \\
+\code{n\_electrons} & both   & Number of electrons $N_e$ ($N_e{=}L$ is half-filling) \\
+\code{n\_so}        & native & Spin orbitals $=2L$ \\
+\code{sector}       & gcg    & Hilbert-space sector: \code{sz0} ($S_z{=}0$) or \code{full} \\
+\code{energy}       & native & Energy of the source eigenstate \\
+\code{gap}          & native & Spectral gap $E_1-E_0$ \\
+\bottomrule
+\end{longtable}
+
+\subsection{State / spin observables (native)}
+\begin{longtable}{@{}p{2.4cm}p{1.6cm}p{9.3cm}@{}}
+\toprule
+Field & Dataset & Description \\ \midrule \endhead
+\code{state\_idx}      & both   & Eigenstate index (0 = ground); \code{"T\{val\}"} for thermal \\
+\code{S2}              & native & $\langle S^2\rangle$ \\
+\code{S}               & native & Total spin $S$ \\
+\code{multiplicity}    & native & $2S+1$ \\
+\code{spin\_label}     & native & Singlet / Doublet / Triplet / \dots \\
+\code{Sz}              & native & $z$-projection of spin \\
+\code{d\_occ}          & native & Total double occupancy $\langle\sum_j n_{j\uparrow}n_{j\downarrow}\rangle$ \\
+\code{d\_occ\_per\_site} & native & Double occupancy per site \\
+\bottomrule
+\end{longtable}
+
+\subsection{RDM fields (features)}
+\begin{longtable}{@{}p{2.4cm}p{1.6cm}p{9.3cm}@{}}
+\toprule
+Field & Dataset & Description \\ \midrule \endhead
+\code{sites}       & both & Site cluster of the RDM \\
+\code{n\_body}     & both & Cluster size $n$; RDM is $2^n\times2^n$ \\
+\code{rho\_real}   & both & Real part of $\rho$ (npz array) \\
+\code{rho\_imag}   & both & Imag part of $\rho$ (npz array) \\
+\code{eigvals}     & both & Eigenvalues of $\rho$ (npz array) \\
+\code{rdm\_eigvals} & both & Eigenvalues of $\rho$ (manifest, stringified) \\
+\code{purity}      & both & $\mathrm{Tr}(\rho^2)$ \\
+\code{is\_pure}    & both & purity $>1-10^{-6}$ \\
+\code{entropy}     & both & von Neumann entropy $-\mathrm{Tr}(\rho\log\rho)$ \\
+\code{tr\_rho2}    & both & $\mathrm{Tr}(\rho^2)$ \\
+\code{tr\_rho3}    & both & $\mathrm{Tr}(\rho^3)$ \\
+\code{rank}        & both & Numerical rank of $\rho$ \\
+\code{raw\_trace}  & native & Trace of $\rho$ before normalisation \\
+\bottomrule
+\end{longtable}
+
+\subsection{GME label fields}
+\begin{longtable}{@{}p{2.9cm}p{1.6cm}p{8.8cm}@{}}
+\toprule
+Field & Dataset & Description \\ \midrule \endhead
+\code{C\_target}            & both   & \textbf{Training label} $=$ \CGME{} (GCG for the gcg dataset) \\
+\code{C\_gcg}               & gcg    & GCG convex-roof \CGME{} \\
+\code{C\_pure}              & both   & Pure-state formula (exact roof if $\rho$ pure) \\
+\code{lower\_bound\_super}  & both   & Supervisor analytical lower bound \\
+\code{C\_UB}                & both   & Upper bound on \CGME{} \\
+\code{C\_stiefel\_best}     & native & Best \CGME{} over Stiefel restarts \\
+\code{C\_stiefel\_mean}     & native & Mean over restarts \\
+\code{C\_stiefel\_std}      & native & Std over restarts (label noise) \\
+\code{C\_stiefel\_n\_valid} & native & Number of valid restarts \\
+\code{C\_stiefel\_total\_time} & native & Total Stiefel wall time \\
+\code{C\_stiefel\_all}      & native & \CGME{} from every restart (npz) \\
+\code{target\_source}       & native & \code{"pure\_formula"} or \code{"stiefel"} \\
+\code{target\_in\_bracket}  & both   & $\text{LB}\le C_{\text{target}}\le\text{UB}$ \\
+\code{status}               & gcg    & Solver status string \\
+\code{solver}               & gcg    & Always \code{"gcg"} \\
+\bottomrule
+\end{longtable}
+
+\subsection{Thermal fields (gcg)}
+\begin{longtable}{@{}p{2.4cm}p{1.6cm}p{9.3cm}@{}}
+\toprule
+Field & Dataset & Description \\ \midrule \endhead
+\code{T}       & gcg & Temperature (0 = ground state; $>0$ = thermal mixed) \\
+\code{thermal} & gcg & True if the RDM is a thermal (mixed) state \\
+\bottomrule
+\end{longtable}
+
+\subsection{Provenance / bookkeeping}
+\begin{longtable}{@{}p{2.4cm}p{1.6cm}p{9.3cm}@{}}
+\toprule
+Field & Dataset & Description \\ \midrule \endhead
+\code{config\_hash} & both   & Unique 12-char hash of the physics point (dedup key) \\
+\code{sweep\_tag}   & both   & Origin: \code{vary\_U}/\code{vary\_t} or \code{ingested\_gme}/\code{surface}/\code{bank} \\
+\code{source}       & gcg    & \code{gme\_runs} / \code{surface} / \code{bank} \\
+\code{config\_json} & both   & Full config dict serialised (npz) \\
+\code{label\_time\_s} & native & Wall time to compute the labels \\
+\code{seed\_base}   & native & RNG seed (reproducibility) \\
+\code{npz\_path}    & both   & Relative path to the \code{.npz} record \\
+\bottomrule
+\end{longtable}
+
+% ===========================================================================
+\section{Auditing the dataset}\label{sec:audit}
+% ===========================================================================
+\code{ml\_audit\_dataset.py} runs a battery of checks and prints a
+\textsc{pass}/\textsc{warn}/\textsc{fail} verdict; it is meant to be re-run
+before \emph{every} training run.
+\begin{enumerate}[nosep]
+  \item \textbf{Label completeness (NaN scan).} Counts NaNs in each label column;
+        \textsc{fail} if a large fraction of \code{C\_target} is missing.
+  \item \textbf{Bracket consistency.} Verifies
+        $\text{lower\_bound\_super}\le C_{\text{target}}\le C_{\text{UB}}$ per record;
+        flags violations (physical impossibility signals a solver bug).
+  \item \textbf{\CGME{} distribution.} Histogram / quantiles of \code{C\_target};
+        warns on degenerate (all-equal or all-zero) or too-narrow spreads that
+        would make regression trivial or ill-posed.
+  \item \textbf{Coverage.} Balance across $(L, n_{\text{body}}, U/t\text{ bin})$
+        cells; warns if some physics regimes are under-represented.
+  \item \textbf{Label noise.} When multiple solver restarts are recorded, reports
+        the spread as an estimate of intrinsic label noise.
+  \item \textbf{Pure vs mixed split.} Fraction of pure ($\text{purity}\approx1$)
+        vs mixed records --- mixed states are the hard, informative cases.
+\end{enumerate}
+
+% ===========================================================================
+\section{Commands}\label{sec:commands}
+% ===========================================================================
+Run from the repository root (the directory containing \code{main.py}).
+
+\paragraph{Stage 1 --- build the RDM banks (general, cached in \code{results/}).}
+\begin{Verbatim}[fontsize=\small]
+for L in 2 4 6 8; do
+  for t in 0.25 0.5 0.75 1.0 1.5 2.0; do
+    for U in 2.0 4.0 8.0 10.0; do
+      python main.py --build-bank --L $L --Ne $L --t $t --U $U --min-n 2 \
+        --workers 8 --use-pkl-cache
+    done
+  done
+done
+# add --full-hamiltonian for the all-Sz sector; even L only for Sz=0 half-filling
+\end{Verbatim}
+
+\paragraph{Stage 2 --- label every bank with GCG (produces the dataset).}
+\begin{Verbatim}[fontsize=\small]
+python gme_qml/ml_ingest_pkls.py --source banks --bank-T 0 0.5 1 2 \
+    --n-restarts 10 --max-iter 200 --k-max-extra 4
+# --source all  also folds in existing gme_runs/ and surface PKLs
+\end{Verbatim}
+
+\paragraph{Stage 3 --- audit before training.}
+\begin{Verbatim}[fontsize=\small]
+python gme_qml/ml_audit_dataset.py --outdir gme_qml/data_for_ML/ingested --plots
+\end{Verbatim}
+
+\paragraph{Stage 4 --- train the baselines.}
+\begin{Verbatim}[fontsize=\small]
+python gme_qml/train_baselines.py --data gme_qml/data_for_ML/ingested
+\end{Verbatim}
+
+\paragraph{Cost note.} Stage~1 (banks) is cheap; Stage~2 costs one GCG solve per
+record and is the dominant work. \code{-{}-bank-T 0} (ground state only) is the
+cheapest; each additional temperature multiplies the number of solves by the
+number of body orders. Memory grows combinatorially with $L$: the full-spectrum
+bank is feasible up to $L\approx8$ on a large-RAM node; $L=10$ is infeasible.
+
+% ===========================================================================
+\section{Memory utilisation}\label{sec:memory}
+% ===========================================================================
+All density matrices are stored in \code{complex128}: \textbf{16 bytes per
+matrix element} ($8$-byte real $+\,8$-byte imaginary). Every memory figure below
+follows directly from this.
+
+\subsection{A single $n$-body RDM (depends only on $n$)}
+An $n$-body RDM is a $2^{n}\times2^{n}$ matrix, i.e. $4^{n}$ complex elements:
+\[
+  M_{\mathrm{RDM}}(n) \;=\; \underbrace{2^{n}\times 2^{n}}_{4^{n}\ \text{elements}}
+  \times\, 16\ \text{bytes} \;=\; 4^{n}\cdot 16\ \text{bytes},
+\]
+independent of $L$. It \emph{quadruples} for every $+1$ in $n$.
+\begin{center}
+\begin{tabular}{@{}rrrr@{}}
+\toprule
+$n$ & matrix $2^n\!\times\!2^n$ & elements $4^{n}$ & memory \\ \midrule
+2  & $4\times4$        & 16          & 256 B  \\
+3  & $8\times8$        & 64          & 1 KB   \\
+4  & $16\times16$      & 256         & 4 KB   \\
+5  & $32\times32$      & 1\,024      & 16 KB  \\
+6  & $64\times64$      & 4\,096      & 64 KB  \\
+7  & $128\times128$    & 16\,384     & 256 KB \\
+8  & $256\times256$    & 65\,536     & 1 MB   \\
+9  & $512\times512$    & 262\,144    & 4 MB   \\
+10 & $1024\times1024$  & 1\,048\,576 & 16 MB  \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Full RDM bank and diagonalisation (depend on $L$)}
+The bank holds one RDM \emph{per eigenstate} for every $n=2,\dots,L$, so it
+scales with the Hilbert dimension $d(L)$. For the $S_z{=}0$ sector at half-filling
+($N_e=L$, \emph{even} $L$),
+\[
+  d(L)=\binom{L}{L/2}^{2},\qquad
+  M_{\mathrm{bank}}(L)=d(L)\sum_{n=2}^{L}4^{n}\cdot 16\ \text{bytes},
+\]
+and dense diagonalisation additionally needs the eigenvector matrix,
+$M_{\mathrm{eigh}}(L)\approx 2\,d(L)^{2}\cdot 16$ bytes. Both grow
+combinatorially; the $n{=}L$ term dominates the bank.
+\begin{center}
+\begin{tabular}{@{}rrrrrrl@{}}
+\toprule
+$L$ & $N_e$ & $d(L)$ & bank$[n{=}L]$ & full bank & dense eigh & feasibility \\ \midrule
+2  & 2  & 4       & 1 KB    & 1 KB    & 512 B  & trivial \\
+4  & 4  & 36      & 144 KB  & 189 KB  & 41 KB  & trivial \\
+6  & 6  & 400     & 25 MB   & 33 MB   & 4.9 MB & laptop \\
+8  & 8  & 4\,900  & 4.8 GB  & 6.4 GB  & 733 MB & large-RAM node \\
+10 & 10 & 63\,504 & 992 GB  & 1.3 TB  & 120 GB & \textbf{infeasible} \\
+\bottomrule
+\end{tabular}
+\end{center}
+\emph{Odd $L$ at half-filling has no $S_z{=}0$ sector} ($N_e$ is odd, so
+$N_\uparrow=N_\downarrow=N_e/2$ is non-integer); use the full Hamiltonian (all
+$S_z$, dimension $\binom{2L}{N_e}$: $20, 252, 3432, 48\,620$ for $L=3,5,7,9$),
+which is larger than the even-$L$ $S_z{=}0$ figures above. The single dominant
+cost is always the $n{=}L$ bank --- e.g.\ $\text{bank}[n{=}10]=63\,504\times16$ MB
+$=992$ GB on its own. On a $\sim$1.5 TB node the practical ceiling is
+$L\approx8$; per-worker eigenvector duplication (avoided here by fork
+copy-on-write) would otherwise multiply the eigenvector cost by the number of
+workers.
+
+\subsection{How the memory grows (scaling)}\label{sec:scaling}
+There are two independent growth knobs, $n$ and $L$, and they compound.
+
+\paragraph{Growing $n$: $\times4$ per step.}
+An $n$-body RDM is a square matrix of side $2^{n}$. Adding one site to the
+cluster \emph{doubles} the side ($2^{n}\!\to\!2^{n+1}$) and therefore
+\emph{quadruples} the number of elements ($4^{n}\!\to\!4^{n+1}$). Memory
+$=$ elements $\times16$ bytes, so it grows $\times4$ at every step:
+\[
+  \underbrace{256\,\text{B}}_{n=2}\!\to 1\,\text{KB}\!\to 4\,\text{KB}\!\to
+  16\,\text{KB}\!\to 64\,\text{KB}\!\to 256\,\text{KB}\!\to 1\,\text{MB}\!\to
+  4\,\text{MB}\!\to\underbrace{16\,\text{MB}}_{n=10},
+  \qquad \text{each arrow } \times4 .
+\]
+This is pure exponential in $n$: $M_{\mathrm{RDM}}(n)\propto 4^{n}$.
+
+\paragraph{Growing $L$: two exponentials multiply.}
+The full bank is much steeper because two effects compound:
+\begin{enumerate}[nosep]
+  \item \textbf{More eigenstates.} The bank stores one RDM \emph{per eigenstate},
+        and the number of eigenstates is
+        $\;d(L)=\binom{L}{L/2}^{2}\approx 4^{L}/L$:
+        \[
+          d:\quad 4 \to 36 \to 400 \to 4\,900 \to 63\,504
+          \qquad(\times9,\ \times11,\ \times12,\ \times13\ \text{per }{+}2).
+        \]
+  \item \textbf{Bigger RDMs.} Each state's largest RDM ($n{=}L$) is itself
+        $4^{L}\cdot16$ bytes, growing $\times16$ per ${+}2$ in $L$.
+\end{enumerate}
+Since $\text{bank}\approx(\text{number of states})\times(\text{size of the largest RDM})$,
+\[
+  M_{\mathrm{bank}}(L)\;\approx\; d(L)\,\cdot\,4^{L}\cdot 16
+  \;\approx\;\frac{4^{L}}{L}\cdot 4^{L}\;\sim\;\frac{16^{\,L}}{L}.
+\]
+So each ${+}2$ in $L$ multiplies memory by roughly
+$\underbrace{\times12}_{\text{more states}}\times\underbrace{\times16}_{\text{bigger RDMs}}\approx\times200$,
+exactly the observed ladder:
+\[
+  \underbrace{1\,\text{KB}}_{L=2}\!\to 189\,\text{KB}\!\to 33\,\text{MB}\!\to
+  6.4\,\text{GB}\!\to\underbrace{1.3\,\text{TB}}_{L=10},
+  \qquad \text{each arrow } \approx\times200 .
+\]
+
+\paragraph{Takeaway.}
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+Knob & Scaling & Growth rate \\ \midrule
+$n$ (a single RDM)   & $\propto 4^{n}$  & $\times4$ per step \\
+$L$ (the full bank)  & $\propto 16^{L}/L$ & $\times{\sim}14$ per step ($\times200$ per ${+}2$) \\
+\bottomrule
+\end{tabular}
+\end{center}
+$L$ is the killer: it is the \emph{product} of two exponentials --- more states
+to store \emph{and} each state's RDM exponentially larger. This is why a single
+$n{=}10$ RDM is only $16$ MB, yet the whole $L{=}10$ bank is $1.3$ TB: the
+$n{=}10$ slice alone is $16\,\text{MB}\times 63\,504\ \text{states}\approx 1$ TB.
+
+% ===========================================================================
+\section{Current status: what is already done}\label{sec:status}
+% ===========================================================================
+This section summarises, for the supervisor, exactly what data exists and what
+has been trained on it so far.
+
+\subsection{Dataset inventory}
+\begin{center}
+\begin{tabular}{@{}lrl@{}}
+\toprule
+Source & Records & Coverage \\
+\midrule
+Native manifest (\code{ml\_generate\_ml\_dataset.py}) & 2{,}610 &
+  $L=3$--$6$, uniform ring, vary-$U$ + vary-$t$, ground + excited states,
+  $n=2..L$ \\
+Ingested from PKL caches (\code{ml\_ingest\_pkls.py}) & 111 &
+  GCG-labelled records mined from existing RDM banks / surface / thermal PKLs
+  (free data, no recomputation) \\
+\bottomrule
+\end{tabular}
+\end{center}
+All records are Sz$=0$ sector; ground- and excited-state (T$=0$) and thermal
+(mixed, $T>0$) states are both represented. The audit (\code{ml\_audit\_dataset.py})
+passes on completeness, RDM validity and coverage, with one open flag: 57/2610
+(2.2\%) native records show a bracket violation
+($\text{LB}\le C_{\text{target}}\le\text{UB}$ broken), traced to the label
+solver (Section~\ref{sec:gaps}).
+
+\subsection{Trained baselines (Stage 4, \code{train\_baselines.py})}
+Evaluated with a \textbf{group split by Hamiltonian} (all records from the same
+$(L,t,U,\text{state})$ stay in one fold, preventing leakage from near-duplicate
+site-clusters): 1{,}992 training / 660 held-out test records, 103/35 groups.
+
+\paragraph{Task A --- Detection ($\CGME{}>\varepsilon=0.01$).}
+\begin{center}
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+Model & Accuracy & ROC-AUC & F1 & Hard-band acc.\ ($n{=}181$) \\
+\midrule
+Logistic regression & 0.952 & 0.960 & 0.969 & 0.823 \\
+Random forest        & 0.955 & 0.973 & 0.971 & 0.834 \\
+\textbf{HistGBM (best)} & \textbf{0.962} & 0.972 & \textbf{0.976} & \textbf{0.862} \\
+\bottomrule
+\end{tabular}
+\end{center}
+The \emph{hard band} (records within $0.05$ of the threshold $\varepsilon$) is
+the honest metric: overall accuracy is inflated by the many unambiguous
+(strongly entangled or clearly separable) records. An 86\% hard-band accuracy
+means roughly 1 in 7 boundary cases is still misclassified --- consistent with
+the literature, where near-threshold detection is the known weak point of all
+ML entanglement classifiers.
+
+\paragraph{Task B --- Estimation (regressing the value of \CGME{}).}
+\begin{center}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+Model & MAE & RMSE & $R^2$ \\
+\midrule
+Physics baseline (supervisor's analytic LB) & 0.166 & 0.273 & 0.443 \\
+Ridge                    & 0.150 & 0.208 & 0.676 \\
+Random forest            & 0.049 & 0.096 & 0.932 \\
+\textbf{HistGBM (best)}  & \textbf{0.042} & 0.094 & \textbf{0.934} \\
+\bottomrule
+\end{tabular}
+\end{center}
+The best model (HistGBM) reduces the mean error to a quarter of the physics
+baseline's ($0.042$ vs.\ $0.166$). Broken down by body order $n$ (HistGBM):
+\begin{center}
+\begin{tabular}{@{}cccc@{}}
+\toprule
+$n$ & MAE & $R^2$ & note \\
+\midrule
+2 & 0.014 & 0.994 & concurrence-equivalent; near-exact \\
+\textbf{3} & \textbf{0.086} & \textbf{0.698} & \textbf{weakest --- the minimal genuinely-multipartite order} \\
+4 & 0.017 & 0.990 & near-exact \\
+\bottomrule
+\end{tabular}
+\end{center}
+The degradation at $n=3$ is the single most important finding so far: it is
+precisely the smallest cluster size at which \emph{genuine} multipartite
+(as opposed to pairwise) entanglement exists, and it is where the RDM spans the
+richest mix of separable / biseparable / genuinely-entangled structure. This is
+the priority target for the next modelling iteration (better features and/or
+more $n=3$ training data).
+
+% ===========================================================================
+\section{What data is still required}\label{sec:gaps}
+% ===========================================================================
+Ordered by priority.
+\begin{enumerate}[nosep]
+  \item \textbf{Relabel with GCG.} The 2{,}610 native records were labelled by
+        \code{convex\_roof\_stiefel}, which we have since verified is less
+        accurate than GCG (the current default solver everywhere else in the
+        project). The label noise this introduces is the most likely cause of
+        the 2.2\% bracket violations. \emph{Action:} add a
+        \code{-{}-label-solver gcg} mode to \code{ml\_generate\_ml\_dataset.py}
+        (or fully rely on the GCG-labelled ingestion path) and relabel/retrain.
+  \item \textbf{More separable ($\CGME{}\approx0$) examples.} Ground-state
+        Hubbard RDMs are almost always entangled; the only source of
+        near-zero labels is high-temperature thermal states. \emph{Action:}
+        ingest denser, hotter $T$ grids from the thermal/surface PKLs to fix
+        the class imbalance feeding the hard-band weakness above.
+  \item \textbf{Full-Hamiltonian (all-$S_z$) records.} Every record so far is
+        Sz$=0$. The sector tag already exists in the caches, so ingesting
+        \code{-{}-full-hamiltonian} banks/runs requires no new physics code,
+        only running the ingestion over those caches.
+  \item \textbf{More $n=3$ coverage.} Given the finding above, additional
+        $n=3$ records (more $U/t$ points, more thermal states, and/or the new
+        molecular 3-orbital clusters) are the highest-value single addition to
+        the dataset.
+  \item \textbf{Molecular records (new source).} The molecular GME pipeline
+        (Benzene CAS$(6,6)$, canonical and Pipek--Mezey localized bases, T$=0$
+        and thermal) now produces GCG-labelled RDMs in the same PKL format.
+        These are not yet ingested; adding them would let the dataset test
+        transfer from the Hubbard ring to a real molecular system.
+\end{enumerate}
+
+% ===========================================================================
+\section{Summary}
+% ===========================================================================
+The dataset couples a cached, task-independent \emph{RDM bank} (the feature
+source) with the \emph{GCG convex roof} (the label). Banks are built once per
+Hamiltonian in \code{results/}; records --- RDM $+$ derived features $+$ \CGME{}
+--- are written to \code{gme\_qml/data\_for\_ML/ingested/} and audited before
+training. Every stored field is enumerated in Section~\ref{sec:schema} and in
+the machine-readable \code{data\_dictionary.csv}. Baselines are trained
+(Section~\ref{sec:status}); the priority list for the next data-generation pass
+is given in Section~\ref{sec:gaps}, headed by relabelling with GCG and
+improving $n=3$ / class-balance coverage.
+
+\end{document}

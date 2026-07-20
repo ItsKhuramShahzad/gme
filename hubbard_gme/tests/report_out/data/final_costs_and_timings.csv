@@ -1,0 +1,16 @@
+n,method,series_key,optimizer,final_cost,callback_points,time_s,time_min,rank,k,source,source_file
+3,GCG (Method I),gcg,,0.0224995313,300,40.0234,0.6671,8,9,computed,conv_v1_L6_Ne6_nso12_U4_t1_mode-uniform_n3-4-5_methods-all_method-II-L-BFGS-B_restarts10_iter300_20260619_001046.pkl
+3,Stiefel L-BFGS-B (Method II),stiefel:L-BFGS-B,L-BFGS-B,0.2370888425,11,38.4269,0.6404,8,12,computed,conv_v1_L6_Ne6_nso12_U4_t1_mode-uniform_n3-4-5_methods-all_method-II-L-BFGS-B_restarts10_iter300_20260619_001046.pkl
+3,Stiefel Powell (Method II),stiefel:Powell,Powell,0.1727385353,9,282.0198,4.7003,8,12,computed,conv_v1_L6_Ne6_nso12_U4_t1_mode-uniform_n3-4-5_methods-stiefel_stiefel-Powell_restarts10_iter5000_20260605_111551.pkl
+3,Stiefel SLSQP (Method II),stiefel:SLSQP,SLSQP,0.0781767380,889,2004.3345,33.4056,8,12,computed,conv_v1_L6_Ne6_nso12_U4_t1_mode-uniform_n3-4-5_methods-stiefel_stiefel-SLSQP_restarts10_iter5000_20260605_113302.pkl
+3,Stiefel TNC (Method II),stiefel:TNC,TNC,0.2118081733,83,2252.7766,37.5463,8,12,computed,conv_v1_L6_Ne6_nso12_U4_t1_mode-uniform_n3-4-5_methods-stiefel_stiefel-TNC_restarts10_iter5000_20260605_114629.pkl
+4,GCG (Method I),gcg,,0.1590219253,300,764.7787,12.7463,11,15,computed,conv_v1_L6_Ne6_nso12_U4_t1_mode-uniform_n3-4-5_methods-all_method-II-L-BFGS-B_restarts10_iter300_20260619_001046.pkl
+4,Stiefel L-BFGS-B (Method II),stiefel:L-BFGS-B,L-BFGS-B,0.4916860350,6,85.7065,1.4284,11,15,computed,conv_v1_L6_Ne6_nso12_U4_t1_mode-uniform_n3-4-5_methods-all_method-II-L-BFGS-B_restarts10_iter300_20260619_001046.pkl
+4,Stiefel Powell (Method II),stiefel:Powell,Powell,0.3547665474,6,680.7913,11.3465,11,15,computed,conv_v1_L6_Ne6_nso12_U4_t1_mode-uniform_n3-4-5_methods-stiefel_stiefel-Powell_restarts10_iter5000_20260605_111551.pkl
+4,Stiefel SLSQP (Method II),stiefel:SLSQP,SLSQP,0.1728970824,750,10218.9924,170.3165,11,15,computed,conv_v1_L6_Ne6_nso12_U4_t1_mode-uniform_n3-4-5_methods-stiefel_stiefel-SLSQP_restarts10_iter5000_20260605_113302.pkl
+4,Stiefel TNC (Method II),stiefel:TNC,TNC,0.3168971876,281,10889.2731,181.4879,11,15,computed,conv_v1_L6_Ne6_nso12_U4_t1_mode-uniform_n3-4-5_methods-stiefel_stiefel-TNC_restarts10_iter5000_20260605_114629.pkl
+5,GCG (Method I),gcg,,0.3979929593,300,508.5248,8.4754,10,14,computed,conv_v1_L6_Ne6_nso12_U4_t1_mode-uniform_n3-4-5_methods-all_method-II-L-BFGS-B_restarts10_iter300_20260619_001046.pkl
+5,Stiefel L-BFGS-B (Method II),stiefel:L-BFGS-B,L-BFGS-B,0.4546648975,7,119.6113,1.9935,10,14,computed,conv_v1_L6_Ne6_nso12_U4_t1_mode-uniform_n3-4-5_methods-all_method-II-L-BFGS-B_restarts10_iter300_20260619_001046.pkl
+5,Stiefel Powell (Method II),stiefel:Powell,Powell,0.4114615977,7,1135.2419,18.9207,10,14,computed,conv_v1_L6_Ne6_nso12_U4_t1_mode-uniform_n3-4-5_methods-stiefel_stiefel-Powell_restarts10_iter5000_20260605_111551.pkl
+5,Stiefel SLSQP (Method II),stiefel:SLSQP,SLSQP,0.4015636306,679,7112.3291,118.5388,10,14,computed,conv_v1_L6_Ne6_nso12_U4_t1_mode-uniform_n3-4-5_methods-stiefel_stiefel-SLSQP_restarts10_iter5000_20260605_113302.pkl
+5,Stiefel TNC (Method II),stiefel:TNC,TNC,0.4123299950,70,9243.2795,154.0547,10,14,computed,conv_v1_L6_Ne6_nso12_U4_t1_mode-uniform_n3-4-5_methods-stiefel_stiefel-TNC_restarts10_iter5000_20260605_114629.pkl

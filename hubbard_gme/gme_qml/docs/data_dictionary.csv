@@ -1,0 +1,56 @@
+group,field,storage,dtype,dataset,description
+System,L,manifest+config,int,both,Number of lattice sites in the Hubbard ring
+System,t,manifest+config,float,both,Hopping amplitude (kinetic energy scale)
+System,U,manifest+config,float,both,On-site Coulomb interaction strength
+System,U_over_t,manifest,float,both,Coupling ratio U/t (primary physics axis)
+System,mode,manifest+config,str,both,Lattice topology (uniform/open/nnn/ssh/ladder)
+System,n_electrons,manifest+config,int,both,Number of electrons Ne (Ne=L is half-filling)
+System,n_so,manifest,int,native,Number of spin orbitals (= 2L)
+System,sector,config_json,str,gcg,Hilbert-space sector: sz0 (Sz=0) or full (all Sz sectors)
+System,energy,manifest,float,native,Energy of the eigenstate the RDM is taken from
+System,gap,manifest,float,native,Spectral gap E1 - E0 of the many-body spectrum
+State/Spin,state_idx,manifest+config,int/str,both,Eigenstate index (0 = ground); "T{value}" for thermal records
+State/Spin,S2,manifest,float,native,Expectation value <S^2> of the total spin operator
+State/Spin,S,manifest,float,native,Total spin quantum number S
+State/Spin,multiplicity,manifest,float,native,Spin multiplicity 2S+1
+State/Spin,spin_label,manifest,str,native,Human label (Singlet/Doublet/Triplet/...)
+State/Spin,Sz,manifest,float,native,z-projection of total spin
+State/Spin,d_occ,manifest,float,native,Total double occupancy <sum_j n_up n_dn>
+State/Spin,d_occ_per_site,manifest,float,native,Double occupancy per site
+RDM,sites,manifest+config,list[int],both,The site cluster whose reduced density matrix is stored
+RDM,n_body,manifest+config,int,both,Cluster size n; the RDM is a 2^n x 2^n matrix
+RDM,rho_real,npz,float32[2^n x 2^n],both,Real part of the n-body reduced density matrix rho (feature)
+RDM,rho_imag,npz,float32[2^n x 2^n],both,Imaginary part of rho (feature)
+RDM,eigvals,npz,float64[2^n],both,Eigenvalues of rho
+RDM,rdm_eigvals,manifest,list[float],both,Eigenvalues of rho (stringified list in the CSV)
+RDM,purity,manifest+npz,float,both,Purity Tr(rho^2)
+RDM,is_pure,manifest+npz,bool,both,True if purity > 1 - 1e-6 (pure state)
+RDM,entropy,manifest,float,both,von Neumann entropy -Tr(rho log rho)
+RDM,tr_rho2,manifest,float,both,Tr(rho^2) (= purity)
+RDM,tr_rho3,manifest,float,both,Tr(rho^3) (higher moment feature)
+RDM,rank,manifest,int,both,Numerical rank of rho (eigenvalues > 1e-10)
+RDM,raw_trace,manifest,float,native,Trace of rho before normalization (sanity check)
+GME label,C_target,manifest+npz,float,both,TRAINING LABEL = C_GME (GCG for gcg dataset; Stiefel for native)
+GME label,C_gcg,manifest+npz,float,gcg,GCG convex-roof estimate of C_GME
+GME label,C_pure,manifest+npz,float,both,Pure-state formula value (exact convex roof if state is pure)
+GME label,lower_bound_super,manifest+npz,float,both,Supervisor analytical lower bound on C_GME
+GME label,C_UB,manifest+npz,float,both,Upper bound on C_GME
+GME label,C_stiefel_best,manifest+npz,float,native,Best (lowest) C_GME over Stiefel restarts
+GME label,C_stiefel_mean,manifest,float,native,Mean C_GME over Stiefel restarts
+GME label,C_stiefel_std,manifest,float,native,Std of C_GME over restarts (label-noise signal)
+GME label,C_stiefel_n_valid,manifest,int,native,Number of valid (non-NaN) Stiefel restarts
+GME label,C_stiefel_total_time,manifest,float,native,Total wall time for all Stiefel restarts
+GME label,C_stiefel_all,npz,float64[R],native,C_GME from every Stiefel restart
+GME label,target_source,manifest,str,native,How C_target was set: "pure_formula" or "stiefel"
+GME label,target_in_bracket,manifest+npz,bool,both,True if lower_bound_super <= C_target <= C_UB
+GME label,status,manifest,str,gcg,Solver status string from the standalone GME run
+GME label,solver,manifest+npz,str,gcg,Solver used for the label (always "gcg" in the gcg dataset)
+Thermal,T,manifest+npz,float,gcg,Temperature of the state (0 = ground state; >0 = thermal mixed)
+Thermal,thermal,manifest+npz,bool,gcg,True if the RDM is a thermal (mixed) state at T>0
+Provenance,config_hash,manifest,str,both,Unique 12-char hash identifying the physics point (dedup key)
+Provenance,sweep_tag,manifest+config,str,both,Sweep origin: vary_U/vary_t (native) or ingested_gme/surface/bank (gcg)
+Provenance,source,manifest,str,gcg,Ingestion source: gme_runs / surface / bank
+Provenance,config_json,npz,str(json),both,Full config dict (L,t,U,mode,Ne,state_idx,sites,n_body,...) serialized
+Provenance,label_time_s,manifest,float,native,Wall time to compute the labels for this record
+Provenance,seed_base,manifest,int,native,RNG seed derived from config_hash (reproducibility)
+Provenance,npz_path,manifest,str,both,Relative path to the .npz record file

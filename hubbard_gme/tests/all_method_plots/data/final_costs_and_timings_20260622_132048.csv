@@ -1,0 +1,7 @@
+n,method,tag,final_cost,callback_points,time_s,time_min,rank,k
+4,GCG (Method I),gcg,0.1587322046,659,655.7238,10.9287,11,15
+4,Stiefel L-BFGS-B (II),methodII_L-BFGS-B,0.3194091749,22,222.7202,3.7120,11,15
+4,Stiefel Powell (II),methodII_Powell,0.5077582989,2,214.9869,3.5831,11,15
+4,Stiefel SLSQP (II),methodII_SLSQP,0.1683975161,1002,6152.8924,102.5482,11,15
+4,Stiefel TNC (II),methodII_TNC,0.3301085997,180,11345.1714,189.0862,11,15
+4,Stiefel-GCG (Method III),methodII_gcg,0.1584116441,835,719.7343,11.9956,11,15

@@ -1,0 +1,27 @@
+# --- outputs/ and results/: exclude everything EXCEPT PDF files ---
+# Ignore all contents at any depth ...
+outputs/**
+results/**
+# ... but keep the directory structure so git can descend ...
+!outputs/**/
+!results/**/
+# ... and keep every .pdf at any depth.
+!outputs/**/*.pdf
+!results/**/*.pdf
+
+# --- Large data files: never push ---
+*.hdf5
+
+# --- Python caches / build artifacts ---
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+
+# --- WSL/Windows download markers ---
+*Zone.Identifier
+
+# --- Jupyter checkpoints ---
+.ipynb_checkpoints/

@@ -1,0 +1,325 @@
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                                                                           ║
+║            HOW TO RUN — HUBBARD GME  (Tasks 1–4 + Full Hamiltonian)        ║
+║                                                                           ║
+║              Location: /home/anjum/PhDWork/hubbard_gme                     ║
+║                                                                           ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+Standard system for all tasks:
+    L = 6 ring, Ne = 6 (half-filling), t = 1.0, U = 10.0  (t/U = 0.1),
+    uniform PBC, GCG convex-roof solver, n = 2..6.
+
+Every task can be run in TWO Hilbert-space modes:
+    • DEFAULT           → Sz = 0 sector only   (n_up = n_down = Ne/2)
+    • --full-hamiltonian → complete Ne-electron space (all Sz sectors)
+
+The four tasks:
+    TASK 1  Thermal GME vs Temperature         C_GME(n, T)
+    TASK 2  3D surface (Temperature × t/U)      C_GME(n; t/U, T)
+    TASK 3  t-scan vs t/U   (T = 0)             C_GME(n, t/U)
+    TASK 4  U-scan vs U/t   (T = 0)             C_GME(n, U/t)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+SETUP
+═══════════════════════════════════════════════════════════════════════════════
+
+cd /home/anjum/PhDWork/hubbard_gme
+
+# Run everything (Tasks 1–4) in one go:
+bash run_all_tasks.sh
+
+
+═══════════════════════════════════════════════════════════════════════════════
+COMMON OPTIONS (shared by all tasks)
+═══════════════════════════════════════════════════════════════════════════════
+
+System           --L 6            number of sites
+                 --Ne 6           number of electrons (default: L = half-filling)
+                 --t 1.0          hopping amplitude
+                 --U 10.0         on-site interaction  (t/U = 0.1)
+                 --mode uniform   topology: uniform|open|nnn|ssh|ladder
+                 --min-n 2        smallest body order n
+                 --output-prefix  filename prefix for outputs
+
+Solver (GCG)     --thermal-solver gcg     convex-roof GCG (default, required)
+                 --n-restarts 10          GCG restarts per k
+                 --max-iter 200           GCG iterations per restart
+                 --k-max-extra 4          extra decomposition ranks
+                 --workers 6              parallel worker processes
+
+Hilbert space    (default)                Sz = 0 sector only
+                 --full-hamiltonian       all Sz sectors (complete H)
+
+Caching          --use-pkl-cache          reuse/save PKL results
+                 --force-thermal-recompute ignore existing PKL, recompute
+
+
+═══════════════════════════════════════════════════════════════════════════════
+TASK 1: THERMAL GME vs TEMPERATURE   C_GME(n, T)
+═══════════════════════════════════════════════════════════════════════════════
+
+Sweeps temperature T at fixed t, U.  x-axis = Temperature T (K), y = C_GME.
+
+1.1  DEFAULT (Sz = 0 sector)
+     ───────────────────────
+     python main.py --thermal \
+       --L 6 --Ne 6 --t 1.0 --U 10.0 \
+       --T-min 0 --T-max 5 --T-steps 40 \
+       --min-n 2 \
+       --thermal-solver gcg --n-restarts 10 --max-iter 200 --k-max-extra 4 \
+       --workers 6 --use-pkl-cache \
+       --output-prefix L6_thermal_t1_U10
+
+1.2  FULL HAMILTONIAN (all Sz sectors)
+     ─────────────────────────────────
+     python main.py --thermal \
+       --L 6 --Ne 6 --t 1.0 --U 10.0 \
+       --T-min 0 --T-max 5 --T-steps 40 \
+       --min-n 2 \
+       --thermal-solver gcg --n-restarts 10 --max-iter 200 --k-max-extra 4 \
+       --workers 6 --use-pkl-cache --full-hamiltonian \
+       --output-prefix L6_thermal_t1_U10_full
+
+Extra options
+     --thermal-energy-cutoff 10.0   drop states with (E_k−E_0)/T above this
+     --thermal-all-states           include every eigenstate (no cutoff)
+
+Output:  outputs/…task1_thermal_GME_…pdf
+
+
+═══════════════════════════════════════════════════════════════════════════════
+TASK 2: 3D SURFACE   C_GME(t/U, T)
+═══════════════════════════════════════════════════════════════════════════════
+
+Standalone 3D surface: x = t/U, y = Temperature T, z = C_GME — one 3D panel
+per body-order n (n = 2..6). This merges Task 1 and Task 3:
+     • the T = 0 edge of the surface IS the Task 3 t-scan curve,
+     • the T axis is the Task 1 thermal sweep.
+Uses --t-scan-min/max/steps for the t grid and --T-min/--T-max with
+--tT-surface-T-steps for the temperature grid.
+
+2.1  DEFAULT (Sz = 0 sector)
+     ───────────────────────
+     python main.py --tT-surface \
+       --L 6 --Ne 6 --U 10.0 \
+       --t-scan-min 0.05 --t-scan-max 2.0 --t-scan-steps 20 \
+       --T-min 0.0 --T-max 2.0 --tT-surface-T-steps 15 \
+       --min-n 2 \
+       --thermal-solver gcg --n-restarts 10 --max-iter 200 --k-max-extra 4 \
+       --workers 6 --use-pkl-cache \
+       --output-prefix L6_surface_U10
+
+2.2  FULL HAMILTONIAN (all Sz sectors)
+     ─────────────────────────────────
+     python main.py --tT-surface \
+       --L 6 --Ne 6 --U 10.0 \
+       --t-scan-min 0.05 --t-scan-max 2.0 --t-scan-steps 20 \
+       --T-min 0.0 --T-max 2.0 --tT-surface-T-steps 15 \
+       --min-n 2 \
+       --thermal-solver gcg --n-restarts 10 --max-iter 200 --k-max-extra 4 \
+       --workers 6 --use-pkl-cache --full-hamiltonian \
+       --output-prefix L6_surface_U10_full
+
+2.3  QUICK PREVIEW (coarse grid, for a fast look)
+     ────────────────────────────────────────────
+     python main.py --tT-surface \
+       --L 6 --Ne 6 --U 10.0 \
+       --t-scan-min 0.05 --t-scan-max 2.0 --t-scan-steps 6 \
+       --T-min 0.0 --T-max 2.0 --tT-surface-T-steps 8 \
+       --min-n 2 \
+       --thermal-solver gcg --n-restarts 6 --max-iter 100 --k-max-extra 2 \
+       --workers 6 --use-pkl-cache \
+       --output-prefix L6_surface_U10_quick
+
+Surface controls
+     --t-scan-min/max/steps    the t grid (→ t/U axis)
+     --T-min --T-max           temperature range (→ T axis)
+     --tT-surface-T-steps 15   number of temperature grid points
+
+WARNING (runtime): the surface is heavy — t-steps × T-steps × 5 n-values GCG
+optimisations. 20 × 15 × 5 = 1500 jobs → HOURS. Use 2.3 for a fast check or
+raise --workers.
+
+Output:  outputs/…task3_tT_surface_GME_…pdf   (“…_full…” with -H)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+TASK 3: t-SCAN GME vs t/U   (T = 0)
+═══════════════════════════════════════════════════════════════════════════════
+
+Varies t at fixed U (T = 0), x-axis = t/U.  This is the T = 0 slice of the
+Task 2 surface — fast, since no temperature sweep is involved.
+
+3.1  DEFAULT (Sz = 0 sector)
+     ───────────────────────
+     python main.py --t-scan \
+       --L 6 --Ne 6 --U 10.0 \
+       --t-scan-min 0.05 --t-scan-max 2.0 --t-scan-steps 20 \
+       --min-n 2 \
+       --thermal-solver gcg --n-restarts 10 --max-iter 200 --k-max-extra 4 \
+       --workers 6 --use-pkl-cache \
+       --output-prefix L6_tscan_U10
+
+3.2  FULL HAMILTONIAN (all Sz sectors)
+     ─────────────────────────────────
+     python main.py --t-scan \
+       --L 6 --Ne 6 --U 10.0 \
+       --t-scan-min 0.05 --t-scan-max 2.0 --t-scan-steps 20 \
+       --min-n 2 \
+       --thermal-solver gcg --n-restarts 10 --max-iter 200 --k-max-extra 4 \
+       --workers 6 --use-pkl-cache --full-hamiltonian \
+       --output-prefix L6_tscan_U10_full
+
+Output:  outputs/…task3_tscan_GME_…pdf
+
+
+═══════════════════════════════════════════════════════════════════════════════
+TASK 4: U-SCAN GME vs U/t   (T = 0)
+═══════════════════════════════════════════════════════════════════════════════
+
+Varies U at fixed t (T = 0), x-axis = U/t.  Tests whether entanglement
+depends on U.
+
+4.1  DEFAULT (Sz = 0 sector)
+     ───────────────────────
+     python main.py --u-scan \
+       --L 6 --Ne 6 --t 1.0 \
+       --u-scan-min 1.0 --u-scan-max 20.0 --u-scan-steps 20 \
+       --min-n 2 \
+       --thermal-solver gcg --n-restarts 10 --max-iter 200 --k-max-extra 4 \
+       --workers 6 --use-pkl-cache \
+       --output-prefix L6_uscan_t1
+
+4.2  FULL HAMILTONIAN (all Sz sectors)
+     ─────────────────────────────────
+     python main.py --u-scan \
+       --L 6 --Ne 6 --t 1.0 \
+       --u-scan-min 1.0 --u-scan-max 20.0 --u-scan-steps 20 \
+       --min-n 2 \
+       --thermal-solver gcg --n-restarts 10 --max-iter 200 --k-max-extra 4 \
+       --workers 6 --use-pkl-cache --full-hamiltonian \
+       --output-prefix L6_uscan_t1_full
+
+Output:  outputs/…task4_uscan_GME_…pdf
+
+
+═══════════════════════════════════════════════════════════════════════════════
+FULL HAMILTONIAN — WHAT IT CHANGES
+═══════════════════════════════════════════════════════════════════════════════
+
+DEFAULT (no flag):      restricts to the Sz = 0 sector.
+                        Dim = C(6,3)·C(6,3) = 400 for L=6, Ne=6.
+                        Contains the ground state and all singlet states.
+
+--full-hamiltonian:     keeps all Sz sectors (Sz = −3 … +3).
+                        Dim = C(12,6) = 924 for L=6, Ne=6.
+                        Adds triplets (Sz=±1) and higher multiplets — matters
+                        at higher temperature where they gain Boltzmann weight.
+
+The nBRDM / GCG machinery is identical in both modes; only the eigenstate set
+fed into the thermal sum changes. Output filenames carry an “…_full…” tag so
+the two modes never overwrite each other.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+SYSTEM SIZE & MEMORY LIMITS  (read before increasing L)
+═══════════════════════════════════════════════════════════════════════════════
+
+Hilbert-space dimension:
+     Sz = 0 sector   dim = C(L, Ne/2)^2
+     Full (all Sz)   dim = C(2L, Ne)
+
+All four tasks are THERMAL — they need the FULL spectrum (dense eigh in
+compute_all_eigenstates) AND precompute an RDM for every eigenstate
+(the “RDM bank”). Both scale with dim, so RAM explodes fast.
+
+  L   Ne | Sz=0 dim     | dense eigh (~2·dim²·16B) | RDM bank[n=L] (dim·4^L·16B)
+  ---------------------------------------------------------------------------
+   6    6 |          400 | 4.9 MB                   | 25 MB      ← current, fine
+   8    8 |        4,900 | 733 MB                   | 4.8 GB
+  10   10 |       63,504 | 120 GB                   | ~1 TB      ← already impractical
+  12   10 |      627,264 | 11.5 TB                  | 153 TB
+  20   10 |  240,374,016 | 1.6 EB                   | 3.6 ZB     ← physically impossible
+
+PRACTICAL CEILING for the thermal tasks (Tasks 1–4): L ≈ 8, maybe 10 on a
+big-RAM node. L ≥ 12 is not feasible with full diagonalization + RDM bank.
+
+Why the RDM bank is the killer: it stores ONE reduced density matrix PER
+eigenstate so it can reuse them across all temperatures. One RDM is small
+(16 MB at L=10); holding all `dim` of them (63,504 at L=10) is what reaches
+~1 TB. The cost is the “× every eigenstate” factor, not any single RDM.
+
+To go larger you must leave full diagonalization behind:
+     • ground state only  → sparse eigsh, ONE RDM  (≈16 MB at L=10, ~180 GB
+                            sparse H at L=20 — HPC node, not a laptop),
+     • or DMRG / MPS for the many-body state at larger L.
+The thermal sum over the whole spectrum is the hard wall.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+RUN ALL 4 TASKS IN SEQUENCE
+═══════════════════════════════════════════════════════════════════════════════
+
+# Default (Sz = 0):
+bash run_all_tasks.sh
+
+# Or run individually, back-to-back:
+echo "Task 1: thermal …";    python main.py --thermal    … --output-prefix L6_thermal_t1_U10
+echo "Task 2: 3D surface …"; python main.py --tT-surface … --output-prefix L6_surface_U10
+echo "Task 3: t-scan …";     python main.py --t-scan     … --output-prefix L6_tscan_U10
+echo "Task 4: u-scan …";     python main.py --u-scan     … --output-prefix L6_uscan_t1
+echo "All tasks finished!"
+
+(Replace the “…” with the full option strings from each task section above.)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+USEFUL MONITORING COMMANDS (run in a separate terminal)
+═══════════════════════════════════════════════════════════════════════════════
+
+# Watch for output files
+watch -n 2 "ls -lh outputs/ | tail -12"
+
+# Count generated PDFs
+watch -n 5 "find outputs -name '*.pdf' | wc -l"
+
+# Show current Python processes
+watch -n 2 "ps aux | grep main.py | grep -v grep"
+
+# Tail a background run's log (if you redirected to a file)
+tail -f run.log
+
+
+═══════════════════════════════════════════════════════════════════════════════
+QUICK SUMMARY
+═══════════════════════════════════════════════════════════════════════════════
+
+TASK 1  Thermal GME vs T          --thermal      → task1_thermal_GME_*.pdf
+TASK 2  3D surface (t/U × T)      --tT-surface   → task3_tT_surface_GME_*.pdf
+TASK 3  t-scan vs t/U (T=0)       --t-scan       → task3_tscan_GME_*.pdf
+TASK 4  U-scan vs U/t (T=0)       --u-scan       → task4_uscan_GME_*.pdf
+
+Add  --full-hamiltonian  to ANY task for the complete (all-Sz) Hilbert space.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+APPENDIX: EXCITED-SINGLET (optional — no longer a standard task)
+═══════════════════════════════════════════════════════════════════════════════
+
+The --excited-singlet analysis is still available but is NOT part of the
+standard Task 1–4 workflow.
+
+     python main.py --excited-singlet [--T-sweep] \
+       --L 6 --Ne 6 --t 1.0 --U 10.0 \
+       --T-min 0.01 --T-max 5 --T-steps 30 \
+       --min-n 2 \
+       --thermal-solver gcg --n-restarts 10 --max-iter 200 --k-max-extra 4 \
+       --workers 6 --use-pkl-cache \
+       --output-prefix L6_singlet_t1_U10
+
+     --singlet-k 12       eigenstates scanned to locate the singlet
+     --full-hamiltonian   run in the complete (all-Sz) space
+
+═══════════════════════════════════════════════════════════════════════════════

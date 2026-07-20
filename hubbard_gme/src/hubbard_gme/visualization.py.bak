@@ -1,0 +1,467 @@
+"""
+visualization.py
+----------------
+PDF report generation and heatmap plotting for n-body RDMs and GME analysis.
+
+Each report page type
+---------------------
+title_page     : System parameters and ground-state properties
+rdm_heatmap    : Real + imaginary heatmaps of one n-body RDM
+metrics_table  : Trace, purity, entropy, eigenvalue bounds
+gme_page       : Bipartition purities + C_GME result
+"""
+
+from __future__ import annotations
+
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
+from itertools import product as iproduct
+from datetime import datetime
+from typing import Dict, Optional
+
+from .utils import generate_spin_labels
+from .gme import analyze_one_rdm_for_GME
+
+
+# ── Colour / size helpers ────────────────────────────────────────────────────
+
+def _rdm_figsize(n_sites: int) -> tuple[float, float]:
+    sizes = {1: (9, 4.5), 2: (11, 5.5), 3: (14, 6.5), 4: (18, 8)}
+    return sizes.get(n_sites, (22, 10))
+
+
+def _fontsize_for_n(n_sites: int) -> int:
+    return max(5, 10 - n_sites)
+
+
+# ── Single-RDM heatmap ────────────────────────────────────────────────────────
+
+def plot_rdm_heatmap(
+    rho: np.ndarray,
+    sites: tuple[int, ...],
+    title_suffix: str = "",
+) -> plt.Figure:
+    """
+    Return a Figure with side-by-side real and imaginary heatmaps.
+
+    Parameters
+    ----------
+    rho          : (2ⁿ, 2ⁿ) density matrix.
+    sites        : Tuple of site indices (for title).
+    title_suffix : Extra string appended to figure title.
+    """
+    n_sites  = len(sites)
+    dim      = 2 ** n_sites
+    labels   = generate_spin_labels(n_sites)
+    figsize  = _rdm_figsize(n_sites)
+    fsize    = _fontsize_for_n(n_sites)
+    site_str = ",".join(str(s) for s in sites)
+
+    vmax_re = max(np.max(np.abs(rho.real)) * 1.05, 1e-12)
+    vmax_im = max(np.max(np.abs(rho.imag)) * 1.05, 1e-12)
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
+    fig.suptitle(
+        f"{n_sites}-Body RDM  (Sites {site_str})  {title_suffix}",
+        fontsize=12, fontweight="bold",
+    )
+
+    for ax, data, title, vmax in [
+        (ax1, rho.real, "Real Part",      vmax_re),
+        (ax2, rho.imag, "Imaginary Part", vmax_im),
+    ]:
+        im = ax.matshow(data, cmap="RdBu_r", vmin=-vmax, vmax=vmax)
+        ax.set_title(title, pad=10)
+        ax.set_xticks(range(dim));  ax.set_xticklabels(labels, fontsize=fsize)
+        ax.set_yticks(range(dim));  ax.set_yticklabels(labels, fontsize=fsize)
+        plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+
+    plt.tight_layout()
+    return fig
+
+
+# ── PDF page writers ──────────────────────────────────────────────────────────
+
+def _write_title_page(pdf: PdfPages, system_info: Dict, n_body: int) -> None:
+    fig, ax = plt.subplots(figsize=(11.7, 8.3))
+    ax.axis("off")
+
+    ax.text(
+        0.5, 0.97,
+        "Genuine Multipartite Entanglement Analysis",
+        ha="center", va="top", fontsize=16, fontweight="bold",
+    )
+
+    col1 = f"""
+Model
+-----
+Hubbard ring (1-D, PBC)
+
+System parameters
+-----------------
+Sites (L)         : {system_info['L']}
+Electrons (Ne)    : {system_info['Ne']}
+Hopping (t)       : {system_info['t']}
+Interaction (U)   : {system_info['U']}
+Mode              : {system_info['mode']}
+n-body order      : {n_body}
+"""
+
+    col2 = f"""
+Ground-state properties
+-----------------------
+E₀                : {system_info['E0']:.8f}
+E₁                : {system_info['E1']:.8f}
+
+⟨S²⟩              : {system_info['S2']:.6f}
+S                 : {system_info['S']:.4f}
+⟨Sz⟩              : {system_info['Sz']:.6f}
+Multiplicity 2S+1 : {system_info['multiplicity']:.1f}
+Spin state        : {system_info['spin_label']}
+
+Double occupancy
+----------------
+⟨D⟩ total         : {system_info['double_occ']:.6f}
+⟨D⟩ / site        : {system_info['double_occ_per_site']:.6f}
+"""
+
+    col3 = f"""
+GME summary
+-----------
+Extracted n-spin RDM : n = {n_body}
+
+Purity:
+  γ = Tr(ρ²)
+
+Separable cut criterion:
+  γ_A = 1  ↔  ρ = ρ_A ⊗ ρ_B
+
+C_GME (Troiani et al.):
+  C_GME = √(2 · min_A (1 − Tr(ρ_A²)))
+
+Decision logic:
+  γ = 1  and  all Tr(ρ_A²) < 1   → GME
+  γ = 1  and  some Tr(ρ_A²) = 1  → No GME
+  γ < 1                           → Mixed (convex-roof needed)
+
+Date: {datetime.now().strftime("%Y-%m-%d  %H:%M")}
+"""
+
+    ax.text(0.04, 0.86, col1, ha="left", va="top", fontsize=10, family="monospace")
+    ax.text(0.37, 0.86, col2, ha="left", va="top", fontsize=10, family="monospace")
+    ax.text(0.68, 0.86, col3, ha="left", va="top", fontsize=10, family="monospace")
+
+    pdf.savefig(fig, bbox_inches="tight", dpi=150)
+    plt.close(fig)
+
+
+def _write_rdm_page(
+    pdf: PdfPages,
+    rho: np.ndarray,
+    metrics: Dict,
+    sites: tuple[int, ...],
+) -> None:
+    fig = plot_rdm_heatmap(rho, sites)
+    fig.text(
+        0.5, 0.01,
+        f"Trace={metrics['trace']:.6f}   "
+        f"Purity={metrics['purity']:.6f}   "
+        f"Entropy={metrics['entropy']:.6f}",
+        fontsize=9, ha="center",
+    )
+    pdf.savefig(fig, bbox_inches="tight", dpi=150)
+    plt.close(fig)
+
+
+def _write_metrics_page(
+    pdf: PdfPages,
+    info: Dict,
+    sites: tuple[int, ...],
+) -> None:
+    site_str = ",".join(str(s) for s in sites)
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.axis("off")
+
+    body = (
+        f"RDM Metrics  (Sites = {site_str})\n"
+        f"{'='*55}\n\n"
+        f"  Trace(ρ)              : {info['trace']:.10f}\n"
+        f"  Purity Tr(ρ²)         : {info['purity']:.10f}\n"
+        f"  Von Neumann entropy   : {info['entropy']:.10f}\n"
+        f"  Eigenvalue  min       : {info['eigvals'].min():.6e}\n"
+        f"  Eigenvalue  max       : {info['eigvals'].max():.6e}\n"
+    )
+
+    ax.text(0.1, 0.8, body, ha="left", va="top", fontsize=12, family="monospace")
+    pdf.savefig(fig, bbox_inches="tight", dpi=150)
+    plt.close(fig)
+
+
+def _write_gme_page(
+    pdf: PdfPages,
+    rho: np.ndarray,
+    sites: tuple[int, ...],
+) -> None:
+    gme_info = analyze_one_rdm_for_GME(rho, sites)
+    site_str = ",".join(str(s) for s in sites)
+
+    fig, ax = plt.subplots(figsize=(11, 8))
+    ax.axis("off")
+
+    # ── Left column: bipartition purities ──
+    left = (
+        f"Bipartitions  (Sites {site_str})\n"
+        f"{'─'*42}\n\n"
+        f"  Global purity γ = Tr(ρ²) = {gme_info['global_purity']:.8f}\n\n"
+        f"  {'A':16s}  | {'B':16s}  | Tr(ρ_A²)\n"
+        f"  {'─'*16}  | {'─'*16}  | {'─'*10}\n"
+    )
+    for entry in gme_info["bipartitions"]:
+        marker = "  ← sep." if entry in [
+            {"A": s[0], "B": s[1], "purity_A": entry["purity_A"]}
+            for s in gme_info["separable_cuts"]
+        ] else ""
+        sep_flag = "  ←" if abs(entry["purity_A"] - 1.0) < 1e-8 else ""
+        left += (
+            f"  {str(entry['A']):16s}  | {str(entry['B']):16s}  "
+            f"| {entry['purity_A']:.8f}{sep_flag}\n"
+        )
+
+    # ── Right column: GME conclusion ──
+    if gme_info["status"] == "mixed_state":
+        conclusion = (
+            "STATUS: MIXED STATE\n"
+            "─────────────────────────────────\n\n"
+            "The extracted n-spin RDM is mixed\n"
+            "(Tr(ρ²) < 1).\n\n"
+            "The pure-state C_GME formula is\n"
+            "not applicable here.\n\n"
+            "Convex-roof extension required\n"
+            "(planned for next phase)."
+        )
+    elif gme_info["status"] == "no_GME":
+        sep_list = "\n".join(
+            f"  A={a} | B={b}" for a, b in gme_info["separable_cuts"]
+        )
+        conclusion = (
+            "STATUS: NO GME\n"
+            "─────────────────────────────────\n\n"
+            "At least one bipartition satisfies\n"
+            "Tr(ρ_A²) = 1  →  ρ = ρ_A ⊗ ρ_B\n\n"
+            f"Separable cuts:\n{sep_list}"
+        )
+    else:
+        conclusion = (
+            "STATUS: GME EXISTS ✓\n"
+            "─────────────────────────────────\n\n"
+            "All bipartitions show Tr(ρ_A²) < 1.\n\n"
+            f"C_GME = √(2·(1 − max Tr(ρ_A²)))\n"
+            f"C_GME = {gme_info['C_GME']:.8f}\n\n"
+            "Interpretation:\n"
+            "  C_GME > 0 confirms genuine\n"
+            "  entanglement across ALL cuts."
+        )
+
+    ax.text(0.04, 0.95, left,      ha="left", va="top", fontsize=9,  family="monospace")
+    ax.text(0.60, 0.95, conclusion, ha="left", va="top", fontsize=11, family="monospace")
+
+    fig.suptitle(
+        f"GME Analysis — {len(sites)}-Body RDM (Sites {site_str})",
+        fontsize=13, fontweight="bold",
+    )
+    pdf.savefig(fig, bbox_inches="tight", dpi=150)
+    plt.close(fig)
+
+
+# ── Convex-roof PDF page ──────────────────────────────────────────────────────
+
+def _write_convex_roof_page(
+    pdf: PdfPages,
+    cr_result: dict,
+) -> None:
+    """Write a single convex-roof summary page for one cluster."""
+    sites    = cr_result["sites"]
+    site_str = ",".join(str(s) for s in sites)
+    n        = cr_result["n"]
+
+    fig, ax = plt.subplots(figsize=(11, 8.5))
+    ax.axis("off")
+
+    fig.suptitle(
+        f"Convex-Roof C_GME  —  {n}-Body RDM  (Sites {site_str})",
+        fontsize=13, fontweight="bold",
+    )
+
+    # ── Left column: overview ──
+    lb  = cr_result["lower_bound"]
+    ub  = cr_result["upper_bound"]
+    num = cr_result["numerical"]
+
+    # ── Assess convergence quality ──
+    all_vals = num["all_values"]
+    spread   = max(all_vals) - min(all_vals) if len(all_vals) > 1 else 0.0
+    converged_tightly = spread < 0.01 * max(cr_result["C_numerical"], 1e-8)
+    convergence_str = f"{'TIGHT ✓' if converged_tightly else 'LOOSE ⚠'}  (spread={spread:.2e})"
+
+    status_symbol = {
+        "GME":          "✓  GME EXISTS",
+        "no_GME":       "✗  No GME",
+        "inconclusive": "?  Inconclusive",
+    }.get(cr_result["status"], cr_result["status"])
+
+    left = (
+        f"Convex-Roof Analysis\n"
+        f"{'─'*42}\n\n"
+        f"  Global purity  γ = Tr(ρ²) = {cr_result['global_purity']:.8f}\n"
+        f"  Rank(ρ)                    = {num['rank']}\n\n"
+        f"  ┌──────────────────────────────────────┐\n"
+        f"  │  RESULT                              │\n"
+        f"  │                                      │\n"
+        f"  │  C_LB  (witness lower bound)         │\n"
+        f"  │        = {lb['C_LB']:.8f}              │\n"
+        f"  │                                      │\n"
+        f"  │  C_num (numerical convex roof)       │\n"
+        f"  │        = {num['C_numerical']:.8f}   ← best     │\n"
+        f"  │                                      │\n"
+        f"  │  C_UB  (eigendecomp upper bound)     │\n"
+        f"  │        = {ub['C_UB']:.8f}              │\n"
+        f"  │                                      │\n"
+        f"  │  C_LB ≤ C_num ≤ C_UB : "
+        f"{'YES ✓' if cr_result['bounds_consistent'] else 'CHECK ⚠':10s}│\n"
+        f"  │  Convergence quality  : {convergence_str:14s}│\n"
+        f"  │                                      │\n"
+        f"  │  Status: {status_symbol:28s}│\n"
+        f"  └──────────────────────────────────────┘\n\n"
+        f"  Note: C_LB=0 means the witness did not\n"
+        f"  detect GME, NOT that GME is absent.\n"
+        f"  C_num is the best estimate of C_GME.\n"
+    )
+
+    # ── Right column: method details ──
+    contrib_lines = "\n".join(
+        f"    λ={c['eigenvalue']:.5f}  C_GME(|φ⟩)={c['C_GME_pure']:.5f}"
+        for c in ub["contributions"]
+    )
+
+    right = (
+        f"Method Details\n"
+        f"{'─'*38}\n\n"
+        f"Lower bound (coherence witness)\n"
+        f"  Best pair : x={lb['best_x']}\n"
+        f"              y={lb['best_y']}\n"
+        f"  I_{{x,y}}(ρ) = {lb['best_I']:.8f}\n"
+        f"  Pairs checked : {lb['n_pairs_checked']}\n\n"
+        f"Upper bound (eigendecomposition)\n"
+        f"  C_UB = Σᵢ λᵢ · C_GME(|φᵢ⟩)\n"
+        f"{contrib_lines}\n\n"
+        f"Numerical minimisation\n"
+        f"  Algorithm : L-BFGS-B\n"
+        f"  Restarts  : {num['n_restarts']}\n"
+        f"  Converged : {num['converged']}\n"
+        f"  Best value: {num['C_numerical']:.8f}\n"
+        f"  All restart values:\n"
+        f"  {[round(v,5) for v in num['all_values'][:8]]}\n"
+    )
+
+    ax.text(0.03, 0.92, left,  ha="left", va="top", fontsize=9.5, family="monospace")
+    ax.text(0.55, 0.92, right, ha="left", va="top", fontsize=9.5, family="monospace")
+
+    pdf.savefig(fig, bbox_inches="tight", dpi=150)
+    plt.close(fig)
+
+
+# ── Separate mixed-state analysis PDF ────────────────────────────────────────
+
+def generate_mixed_state_pdf(
+    rdm_dict:    dict,
+    metrics_dict: dict,
+    cr_results:  dict,
+    n:           int,
+    output_path: str,
+    system_info: dict,
+) -> None:
+    """
+    Generate a dedicated PDF containing only mixed-state / convex-roof analysis.
+
+    Pages per cluster (n ≥ 3 only):
+        1. RDM heatmap
+        2. Metrics table
+        3. Convex-roof summary
+
+    Parameters
+    ----------
+    rdm_dict    : {sites_tuple → ρ}
+    metrics_dict: {sites_tuple → metrics dict}
+    cr_results  : {sites_tuple → full_convex_roof_analysis result}
+    n           : Body order to include.
+    output_path : Full path for the output PDF.
+    system_info : System parameter dictionary.
+    """
+    with PdfPages(output_path) as pdf:
+
+        # Title page
+        _write_title_page(pdf, system_info, n)
+
+        for sites, rho in rdm_dict.items():
+            if len(sites) != n:
+                continue
+            if sites not in cr_results:
+                continue
+
+            info = metrics_dict[sites]
+            _write_rdm_page(pdf, rho, info, sites)
+            _write_metrics_page(pdf, info, sites)
+            _write_convex_roof_page(pdf, cr_results[sites])
+
+    print(f"  Mixed-state PDF saved → {output_path}")
+
+
+# ── Public entry point ────────────────────────────────────────────────────────
+
+def generate_gme_pdf(
+    rdm_dict:    dict,
+    metrics_dict: dict,
+    n:           int,
+    output_path: str,
+    system_info: Dict,
+    cr_results:  dict = None,
+) -> None:
+    """
+    Generate a multi-page PDF for all n-body RDMs.
+
+    Pages per cluster:
+        1. RDM heatmap
+        2. Metrics table
+        3. GME analysis  (pure-state or 'mixed — see convex roof' note)
+        4. Convex-roof page  (if cr_results provided for this cluster)
+
+    Parameters
+    ----------
+    rdm_dict      : {sites_tuple → ρ (ground-state RDM)}
+    metrics_dict  : {sites_tuple → metrics dict}
+    n             : Body order to include (filters rdm_dict).
+    output_path   : Full output file path (.pdf).
+    system_info   : Dictionary of system parameters and ground-state props.
+    cr_results    : Optional {sites_tuple → full_convex_roof_analysis result}.
+                    When provided, a convex-roof page is appended for each cluster.
+    """
+    with PdfPages(output_path) as pdf:
+
+        _write_title_page(pdf, system_info, n)
+
+        for sites, rho in rdm_dict.items():
+            if len(sites) != n:
+                continue
+
+            info = metrics_dict[sites]
+
+            _write_rdm_page(pdf, rho, info, sites)
+            _write_metrics_page(pdf, info, sites)
+            _write_gme_page(pdf, rho, sites)
+
+            # Append convex-roof page when available
+            if cr_results and sites in cr_results:
+                _write_convex_roof_page(pdf, cr_results[sites])
+
+    print(f"  PDF saved → {output_path}")

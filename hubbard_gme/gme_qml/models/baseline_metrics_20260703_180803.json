@@ -1,0 +1,97 @@
+{
+  "config": {
+    "eps": 0.01,
+    "band": 0.05,
+    "test_frac": 0.25,
+    "seed": 42,
+    "native_only": false,
+    "data_dir": "/tmp/claude-1000/-home-anjum-PhDWork/5a7cffdd-2e06-4e82-bfe0-422afe019790/scratchpad/gcg_ds_test",
+    "with_bounds": false,
+    "holdout_L": null,
+    "save_models": false
+  },
+  "split": "group split by Hamiltonian (5 train / 2 test groups)",
+  "n_train": 15,
+  "n_test": 6,
+  "feature_names": [
+    "L",
+    "n_body",
+    "t",
+    "U",
+    "U_over_t",
+    "purity",
+    "entropy",
+    "tr_rho2",
+    "tr_rho3",
+    "rank",
+    "T_feat",
+    "thermal_feat",
+    "eig0",
+    "eig1",
+    "eig2",
+    "eig3",
+    "eig4",
+    "eig5",
+    "eig6",
+    "eig7",
+    "eig8",
+    "eig9",
+    "eig10",
+    "eig11",
+    "eig12",
+    "eig13",
+    "eig14",
+    "eig15"
+  ],
+  "detection": {},
+  "estimation": {
+    "baseline_supervisor_LB": {
+      "mae": 1.9976251555697822e-13,
+      "rmse": 2.662076310511578e-13,
+      "r2": 1.0,
+      "n": 6
+    },
+    "ridge": {
+      "mae": 0.07872421093696032,
+      "rmse": 0.08385489122476195,
+      "r2": 0.9670098234990208,
+      "n": 6,
+      "per_n": {
+        "2": {
+          "mae": 0.07872421093696032,
+          "rmse": 0.08385489122476195,
+          "r2": 0.9670098234990208,
+          "n": 6
+        }
+      }
+    },
+    "random_forest": {
+      "mae": 0.1476528558352138,
+      "rmse": 0.1597555800454095,
+      "r2": 0.8802598185119925,
+      "n": 6,
+      "per_n": {
+        "2": {
+          "mae": 0.1476528558352138,
+          "rmse": 0.1597555800454095,
+          "r2": 0.8802598185119925,
+          "n": 6
+        }
+      }
+    },
+    "hist_gbm": {
+      "mae": 0.47077702309302677,
+      "rmse": 0.47380552048243546,
+      "r2": -0.05324176532688707,
+      "n": 6,
+      "per_n": {
+        "2": {
+          "mae": 0.47077702309302677,
+          "rmse": 0.47380552048243546,
+          "r2": -0.05324176532688707,
+          "n": 6
+        }
+      }
+    }
+  }
+}

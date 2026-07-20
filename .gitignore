@@ -1,0 +1,7 @@
+# PhDWork is not a project repo — it only exists to publish hubbard_gme/
+# to github.com/ItsKhuramShahzad/gme as a subfolder.
+# Ignore EVERYTHING at the top level...
+/*
+# ...except the hubbard_gme project and this ignore file.
+!/.gitignore
+!/hubbard_gme/

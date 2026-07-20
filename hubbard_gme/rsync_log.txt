@@ -1,0 +1,10 @@
+sending incremental file list
+hubbard_gme/rsync_log.txt
+             30 100%    0.00kB/s    0:00:00               30 100%    0.00kB/s    0:00:00 (xfr#1, ir-chk=3944/5419)
+hubbard_gme/results/plots/convergence/convergence_methodII_n4_20260622_095457.pdf
+         20.46K 100%   22.52kB/s    0:00:00           20.46K 100%   22.52kB/s    0:00:00 (xfr#2, ir-chk=3697/5419)
+hubbard_gme/results/plots/convergence/individual_all_methodII_TNC_20260622_053404.pdf
+         23.19K 100%   25.54kB/s    0:00:00           23.19K 100%   25.54kB/s    0:00:00 (xfr#3, ir-chk=3636/5419)
+
+sent 377.69K bytes  received 270 bytes  36.00K bytes/sec
+total size is 1.73G  speedup is 4,577.15

@@ -1,0 +1,52 @@
+# `data_for_ML/ingested/` — records mined from existing PKL caches
+
+ML records built by `ml_ingest_pkls.py` from results you already computed, so no
+recomputation is needed. Kept **separate** from the native `../records/` +
+`../manifest.csv` (produced by `ml_generate_ml_dataset.py`) so those are never
+touched.
+
+## Sources linked
+
+| `source` | From | ρ comes from | Labels from |
+|----------|------|--------------|-------------|
+| `gme_runs` | `results/.../gme_runs/job_cache/*.pkl` | linked `rdm_cache/` RDM | `result_full` (C_gcg, C_stiefel, C_UB, supervisor LB, bounds) |
+| `surface` | `results/.../thermal_runs/tTsurface_*.pkl` | **reconstructed** from the cached `rdm_bank/` + Boltzmann weights at T | `C_surface[n][t,T]` (GCG) |
+
+Surface records are thermal (mixed) RDMs — one per (t, T, n), cluster-averaged;
+`thermal=True`, `T` set. GME records are T=0 single-cluster RDMs (`thermal=False`).
+
+## npz schema
+Same as native records **plus** extras (extra keys are harmless to loaders):
+```
+rho_real, rho_imag, eigvals, config_json,
+C_target, C_pure, C_stiefel_best, lower_bound_super, C_UB, purity, is_pure,
+target_in_bracket,
+# extras:
+source, solver, C_gcg, C_stiefel_gcg, C_LB_best, T, thermal
+```
+`C_target` = the best convex-roof value from the source (GCG-based here, vs the
+native dataset's Stiefel-based target — same quantity, different solver; the
+`solver`/`source` fields let you filter).
+
+## Regenerate / update
+```bash
+cd <repo>                       # dir containing main.py
+PYTHONPATH=src python src/hubbard_gme/ml_ingest_pkls.py --source both
+#   --source gme | surface | both
+#   --results-root results/rdm_pkl_results   (default)
+#   --outdir src/hubbard_gme/data_for_ML     (ingested/ is created under it)
+```
+Resumable: re-running skips records whose `config_hash` is already in the
+manifest. Surface ingestion needs the matching `rdm_bank/` files to exist (build
+them with `--build-bank` or run the surface first).
+
+## Using native + ingested together
+Both folders share the core npz keys, so a loader can read from both:
+```python
+import glob, numpy as np
+files = glob.glob("data_for_ML/records/*.npz") + \
+        glob.glob("data_for_ML/ingested/records/*.npz")
+X = [(np.load(f, allow_pickle=True)) for f in files]   # rho_real/imag + C_target
+```
+Filter ingested rows by `source` / `thermal` in `ingested/manifest.csv` if you
+want to weight or hold them out.

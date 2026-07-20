@@ -1,0 +1,427 @@
+\documentclass[11pt]{article}
+% ---------------------------------------------------------------------------
+%  THE MODEL INPUT, FEATURE BY FEATURE
+%  Detailed definitions (formulas), preparation recipe, and the physical and
+%  empirical justification of every input the ML model receives.
+%  Companion to gme_ml_physics_overview.tex.
+%  Compile:  pdflatex gme_ml_input_features.tex   (twice for TOC)
+% ---------------------------------------------------------------------------
+\usepackage[a4paper,margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs,array}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+
+\newcommand{\CGME}{\ensuremath{C_{\mathrm{GME}}}}
+\newcommand{\rdm}{\ensuremath{\Gamma^{(n)}}}
+\newcommand{\Bb}{\ensuremath{B_b}}
+\newcommand{\Bt}{\ensuremath{\widetilde B_b}}
+
+\title{\textbf{The Model Input, Feature by Feature}\\[4pt]
+       \large What the GME-estimation model receives, how every number is
+       computed from the reduced density matrix, and why it is necessary}
+\author{Hubbard-GME project}
+\date{\today}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\bigskip
+
+% ===========================================================================
+\section{The problem the input must solve}
+% ===========================================================================
+The model must predict the genuine multipartite entanglement
+\[
+  \CGME(\rho)\;=\;\min_{\{p_i,\phi_i\}}\;\sum_i p_i\,C(\phi_i),
+  \qquad \rho=\sum_i p_i\,|\phi_i\rangle\langle\phi_i|,
+\]
+--- an expensive convex-roof optimisation (seconds to hours per state) ---
+from \emph{cheap} numbers computable from $\rho$ in microseconds. The input
+design must satisfy four hard constraints:
+\begin{enumerate}[nosep]
+  \item \textbf{Computable from $\rho$ alone.} No Hamiltonian parameters, no
+        temperature, no solver output --- otherwise the model cannot transfer
+        to molecules or leak-free evaluation is impossible.
+  \item \textbf{Fixed length for every cluster size} $n=2\ldots10$, so one
+        model serves all orders (a training table must be rectangular).
+  \item \textbf{Scalable}: the length must grow at most linearly with the
+        design cap, while $\rho$ itself grows as $4^n$ (at $n{=}10$:
+        $91{,}866$ unique off-diagonal entries --- unusable as input).
+  \item \textbf{Convention-robust}: invariant under the orbital sign/phase
+        ambiguities of the construction (verified; Section~\ref{sec:gauge}).
+\end{enumerate}
+
+% ===========================================================================
+\section{How the dataset is prepared}
+% ===========================================================================
+\subsection{The reduced density matrix (the raw material)}
+For an eigenstate $|\Psi_m\rangle$ of the system (Hubbard ring of $N$ sites,
+or a molecular active space) and a cluster of $n$ orbitals, the $n$-spin
+reduced density matrix is built element by element,
+\[
+  \rdm_{\sigma'\sigma}
+  \;=\;\Big\langle\Psi_m\Big|\,\prod_{k=1}^{n}
+     d^{\dagger}_{k,\sigma'_k}\,d^{\phantom\dagger}_{k,\sigma_k}
+     \Big|\Psi_m\Big\rangle ,
+  \qquad \sigma,\sigma'\in\{\uparrow,\downarrow\}^{n},
+\]
+then normalised to unit trace. It is a $2^n\times 2^n$ matrix over the
+cluster's spin configurations: the diagonal holds the \emph{populations}
+(probabilities of each spin pattern), the off-diagonal holds the
+\emph{coherences} (quantum superposition amplitudes between patterns). The
+construction projects onto single occupation of every cluster site, which
+separates spin from charge and is the origin of the gauge robustness proven
+in Section~\ref{sec:gauge}.
+
+\subsection{Thermal states}
+Because the per-eigenstate RDMs do not depend on temperature, a thermal
+(Gibbs) state at temperature $T$ costs no new diagonalisation:
+\[
+  \rdm(T)\;=\;\frac{\sum_m e^{-(E_m-E_0)/T}\;\rdm[\Psi_m]}
+                   {\sum_m e^{-(E_m-E_0)/T}} .
+\]
+The dataset uses the grid $T\in\{0,\,0.1,\,0.25,\,0.5,\,1,\,2\}$; the hot
+points supply the essential $\CGME\approx0$ examples (class balance).
+
+\subsection{The label}
+Every record is labelled by the GCG convex-roof solver:
+$C_{\mathrm{target}}=C_{\mathrm{gcg}}$, computed with a fixed budget
+(8 restarts, 150 iterations, $k_{\max}$ rank $+2$). The label's own
+numerical uncertainty is being measured by a repeated-ensemble experiment;
+features can only be judged against errors larger than that floor.
+
+\subsection{One record}
+One record $=$ one $(\text{system},\text{state or }T,\text{cluster})$ triple:
+the full $\rho$ (archived), the configuration metadata (never model input),
+the label, and the feature vector defined below. Records are grouped by a
+hash of the physical configuration; train/test splits are made \emph{by
+group}, so the model is never tested on a Hamiltonian it trained on.
+
+% ===========================================================================
+\section{The $S_z$ block structure (the organising principle)}
+% ===========================================================================
+Every parent state conserves total $S_z$, so the RDM is \emph{exactly}
+block-diagonal in the cluster's total $S_z$ (verified to $10^{-15}$ over the
+full dataset, both symmetry sectors). Index the blocks by the number of down
+spins $b$:
+\[
+  \rho \;=\; \bigoplus_{b=0}^{n} \Bb ,
+  \qquad
+  \dim \Bb = \binom{n}{b},
+  \qquad
+  S_z^{(b)} = \frac{n-2b}{2} .
+\]
+Example $n=3$: blocks of size $1,3,3,1$ ($S_z=+\tfrac32,+\tfrac12,
+-\tfrac12,-\tfrac32$). Everything outside the blocks is structurally zero
+and carries no information; the features therefore summarise each block
+separately and never waste dimensions on entries known to vanish.
+
+Two conventions apply to \emph{all} features below:
+\begin{itemize}[nosep]
+  \item \textbf{Strict upper triangle}: off-diagonal sums run over $i<j$
+        within a block, so no coherence is counted twice (Hermiticity makes
+        $(i,j)$ and $(j,i)$ redundant).
+  \item \textbf{Structural zeros excluded}: statistics (max, fractions,
+        quantiles) are taken only over valid within-block entries.
+\end{itemize}
+The RDMs are real to machine precision (verified: $\max|\mathrm{Im}\,\rho|=0$
+across all records), so real-part formulas are exact, not approximations.
+
+% ===========================================================================
+\section{Feature-by-feature definitions}\label{sec:features}
+% ===========================================================================
+The vector reserves $11$ block slots ($b=0\ldots10$, design cap $n\le10$);
+for a record of cluster size $n$ only slots $b\le n$ are ``real''. Features
+come in three groups: \emph{per-block} (repeated for each slot),
+\emph{global}, and the \emph{size variable}.
+
+\subsection{Cluster size $n$}
+\[
+  \fbox{$n$}\qquad\text{(1 number)}
+\]
+Sets the dimension $2^n$, the block layout $\binom{n}{b}$, and the
+entanglement order being asked about ($n$-partite). Without it the model
+cannot interpret the block pattern. \emph{Why necessary:} the same block
+values mean different physics at different $n$ (e.g.\ a coherence of $0.5$
+is maximal for $n=2$ but moderate for $n=6$).
+
+\subsection{Block mask $m_b$}
+\[
+  m_b=\begin{cases}1,& b\le n\\ 0,& b>n\end{cases}
+\]
+Distinguishes a \emph{padded} slot (does not exist for this $n$) from a
+\emph{real but empty} block ($p_b=0$ because the state has no weight in that
+$S_z$ sector --- physically meaningful, e.g.\ $S_z{=}0$-sector states never
+populate the extreme blocks). Without the mask these two very different
+situations look identical to the model.
+
+\subsection{Block population $p_b$}
+\[
+  p_b=\operatorname{Tr}\Bb\;\in[0,1],\qquad \sum_b p_b=1 .
+\]
+\emph{Meaning:} the probability that the cluster is found with $b$ down
+spins ($S_z=(n-2b)/2$). \emph{Why necessary:} the population profile encodes
+the spin composition of the state --- ground states at half filling
+concentrate weight near $S_z\!\approx\!0$; heating in the full sector pushes
+weight into the outer (ferromagnetic-like) blocks; a $\CGME$ model must know
+\emph{where} the state lives before asking how coherent it is there.
+
+\subsection{The conditional block $\Bt$ (not a feature --- a normalisation)}
+\[
+  \Bt=\frac{\Bb}{p_b}\qquad (p_b>0),\qquad \operatorname{Tr}\Bt=1 .
+\]
+All internal-structure features below are computed from $\Bt$, not $\Bb$.
+\emph{Why:} it disentangles two independent facts --- \emph{how much}
+probability sits in a sector ($p_b$) and \emph{how organised} that
+probability is inside the sector ($\Bt$). Without the normalisation, a
+weakly-populated but perfectly coherent block would look identical to a
+well-populated but incoherent one.
+
+\subsection{Conditional block purity $q_b$}
+\[
+  q_b=\operatorname{Tr}\!\big(\Bt^{\,2}\big)\;\in\Big[\tfrac{1}{\dim\Bb},\,1\Big].
+\]
+\emph{Meaning:} how mixed the sector is internally: $q_b=1$ --- the sector
+holds a single pure superposition; $q_b=1/\dim\Bb$ --- maximally mixed
+(classical noise). \emph{Why necessary:} mixedness is precisely what makes
+the convex roof nontrivial --- it measures how much room the ``least
+entangled explanation'' has to explain the correlations classically.
+Thermal records are separated from ground-state records mainly by this
+feature (which is why the temperature $T$ itself is \emph{not} needed as an
+input).
+
+\subsection{Coherence strength $C_{2,b}$}
+\[
+  C_{2,b}=\Big(\,2\!\!\sum_{i<j\in b}\!\big|(\Bt)_{ij}\big|^2\Big)^{1/2}.
+\]
+\emph{Meaning:} the total magnitude of quantum superposition inside the
+sector --- the single most entanglement-relevant number. \emph{Why
+necessary:} entanglement lives in the off-diagonals. The canonical
+demonstration is the three-spin W state vs.\ its classical mixture:
+\[
+  |W\rangle=\tfrac{1}{\sqrt3}\big(|{\downarrow\uparrow\uparrow}\rangle
+  +|{\uparrow\downarrow\uparrow}\rangle
+  +|{\uparrow\uparrow\downarrow}\rangle\big)
+  \quad\text{vs.}\quad
+  \rho_{\mathrm{mix}}=\tfrac13\!\sum_{\text{same 3}}|{\cdot}\rangle\langle{\cdot}| .
+\]
+Both have identical diagonals $(\tfrac13,\tfrac13,\tfrac13)$ and identical
+populations; they differ \emph{only} in $C_{2,b}$ ($0.816$ vs $0$) and $q_b$
+($1$ vs $\tfrac13$). A diagonal-only model cannot tell an entangled state
+from classical noise --- and empirically collapses under extrapolation
+($R^2=0.08$ on hold-out-$L$).
+
+\subsection{Signed coherences $s^{+}_b$, $s^{-}_b$}
+\[
+  s^{+}_b=\sum_{i<j\in b}\max\!\big((\Bt)_{ij},\,0\big),
+  \qquad
+  s^{-}_b=\sum_{i<j\in b}\max\!\big(-(\Bt)_{ij},\,0\big).
+\]
+\emph{Meaning:} the total weight of positive vs negative coherences. In our
+fixed collinear-$S_z$ computational basis the \textbf{sign carries spin
+physics}: negative coherences are singlet-type (antisymmetric) couplings ---
+the antiferromagnetic fingerprint of the Hubbard ground state --- while
+positive coherences are triplet-type (symmetric) couplings. \emph{Why two
+numbers instead of one signed sum:} a mixed pattern $(+a,-a)$ and no
+coherence at all both give a signed sum of zero; the pair
+$(s^{+},s^{-})$ keeps them distinct. \emph{Redundancy rule:} the signed sum
+and the $L_1$ coherence are linear combinations,
+\[
+  s_b=s^{+}_b-s^{-}_b,\qquad L_{1,b}=s^{+}_b+s^{-}_b ,
+\]
+so $(s^{+}_b,s^{-}_b)$ is stored and $(s_b,L_{1,b})$ is \emph{not} --- for
+our (real) RDMs they contain exactly the same information.
+
+\emph{Convention-safety:} these signed features are invariant under
+per-orbital sign/phase changes --- proven algebraically (each factor
+$d^{\dagger}_{k\sigma'}d_{k\sigma}$ carries $e^{+i\theta_k}e^{-i\theta_k}=1$)
+and verified numerically on both the Hubbard ring
+($\max|\Delta\rho|=4.6\times10^{-15}$) and benzene PM orbitals
+($1.2\times10^{-13}$); see Section~\ref{sec:gauge}.
+
+\subsection{Hamming-resolved coherence distribution $\bar R_{b,d}$}
+Group the coherences of a block by the Hamming distance between the two spin
+configurations they connect (the number of sites whose spin differs):
+\[
+  H_{b,d}=\sum_{\substack{i<j\in b\\ \mathrm{Ham}(i,j)=d}}
+          \big|(\Bt)_{ij}\big|^{2},
+  \qquad d=2,4,6,8,10 ,
+\]
+(within a fixed-$S_z$ block only \emph{even} distances occur --- flipping one
+spin up requires flipping another down). The stored feature is the
+\emph{normalised distribution},
+\[
+  \bar R_{b,d}=\frac{H_{b,d}}{\sum_{d'}H_{b,d'}} ,
+\]
+because the total is already carried by $C_{2,b}$
+($\sum_d H_{b,d}=C_{2,b}^2/2$) --- storing $C_2$, $H$ and $R$ together would
+be redundant.
+
+\emph{Meaning:} \emph{where} the coherence connects: $d=2$ --- local spin
+exchanges (one pair swapped, e.g.\ nearest-neighbour singlet motion);
+$d=n$ (max) --- superpositions of \emph{globally} different spin patterns
+(N\'eel$\,\leftrightarrow\,$anti-N\'eel), the genuinely multipartite,
+GHZ-like coherences. \emph{Why necessary:} the summary $C_{2,b}$ says how
+much coherence exists, $\bar R_{b,d}$ says whether it is pairwise-local or
+many-body-global --- precisely the distinction between a state entangled
+only in pairs and one with true multipartite structure. This is the compact,
+scalable substitute for the raw coherence \emph{locations} that the
+$+0.07$ hold-out-$R^2$ advantage of raw entries suggests matters.
+\emph{Caution:} Hamming distance is configuration distance, \emph{not}
+spatial distance between orbitals.
+
+\subsection{Strongest coherence $C_{\max,b}$ (shape family)}
+\[
+  C_{\max,b}=\max_{i<j\in b}\big|(\Bt)_{ij}\big| .
+\]
+\emph{Meaning/why:} distinguishes \emph{concentrated} coherence (one
+dominant pair --- Bell-like) from \emph{distributed} coherence (many small
+terms --- W-like) at equal $C_{2,b}$.
+
+\subsection{Significant-coherence fraction $f_{\tau,b}$ (shape family)}
+\[
+  f_{\tau,b}=\frac{\#\{(i,j):\,i<j,\;|(\Bt)_{ij}|>\tau\}}
+                  {\binom{\dim\Bb}{2}},
+  \qquad
+  \boxed{\tau=10^{-6}\ \text{(documented, absolute, on }\Bt\text{)}}
+\]
+\emph{Meaning/why:} the sparsity of the coherence pattern --- a second,
+complementary concentration measure. The threshold is fixed and documented
+so the feature is reproducible; entries below $\tau$ are numerically
+indistinguishable from zero at solver precision.
+
+\subsection{Global summaries (4 numbers)}
+\[
+  C_2^{\mathrm{glob}}=\Big(2\!\!\sum_{i<j}|\rho_{ij}|^2\Big)^{1/2},\quad
+  \max_{i<j}|\rho_{ij}|,\quad
+  \min_{i<j}\rho_{ij},\quad
+  \max_{i<j}\rho_{ij},
+\]
+computed over all valid within-block positions of the \emph{unnormalised}
+$\rho$. \emph{Why:} a whole-matrix fingerprint that survives even when
+individual blocks are nearly empty; the signed extrema flag the single
+strongest singlet and triplet coupling in the state.
+
+% ===========================================================================
+\section{The three nested vectors (exact counts)}
+% ===========================================================================
+\begin{center}
+\begin{tabular}{@{}llcc@{}}
+\toprule
+Version & Per-block content ($\times11$ slots) & Formula & Total \\
+\midrule
+V1 core     & $m_b,\;p_b,\;q_b,\;C_{2,b},\;s^{+}_b,\;s^{-}_b$
+            & $11\times6+1+4$ & \textbf{71} \\
+V2 +Hamming & V1 $+\;\bar R_{b,2},\bar R_{b,4},\bar R_{b,6},
+              \bar R_{b,8},\bar R_{b,10}$
+            & $71+11\times5$ & \textbf{126} \\
+V3 +shape   & V2 $+\;C_{\max,b},\;f_{\tau,b}$
+            & $126+11\times2$ & \textbf{148} \\
+\bottomrule
+\end{tabular}
+\end{center}
+Padded slots ($b>n$): all entries $0$ and $m_b=0$. Invalid Hamming distances
+($d>n$): $0$. The versions are nested so the ablation isolates each family's
+contribution; the final production vector is frozen by experiment (hard-band
+accuracy, hold-out-$L$, molecular transfer), not by argument.
+
+% ===========================================================================
+\section{Why not the raw matrix? (the evidence)}\label{sec:evidence}
+% ===========================================================================
+Six input designs, gradient-boosted trees, split grouped by Hamiltonian
+(4{,}339 records; hard band $=|C-0.01|<0.05$):
+\begin{center}
+\small
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+Input & MAE & $R^2$ & hard-band acc. & hold-out-$L{=}6$ $R^2$ \\
+\midrule
+diagonals only          & 0.0563 & 0.902 & 0.812 & 0.078 \\
+raw off-diagonals only  & 0.0232 & 0.982 & 0.851 & 0.517 \\
+33 block summaries      & 0.0087 & 0.997 & 0.928 & 0.790 \\
+partial enriched        & 0.0076 & 0.998 & 0.918 & 0.799 \\
+raw $+$ summaries       & \textbf{0.0074} & \textbf{0.998} & 0.928
+                        & \textbf{0.864} \\
+\bottomrule
+\end{tabular}
+\end{center}
+\begin{enumerate}[nosep]
+  \item \textbf{Populations alone fail} (hold-out $R^2=0.08$): coherence is
+        not optional --- it is where entanglement lives.
+  \item \textbf{Summaries beat raw entries used alone} ($0.0087$ vs
+        $0.0232$): physics-shaped compression is worth more than raw data at
+        this dataset size.
+  \item \textbf{Raw entries add extrapolation value on top} ($0.864$ vs
+        $0.790$): location information matters; the scalable way to capture
+        it is $\bar R_{b,d}$ (V2), not $91{,}866$ raw numbers.
+\end{enumerate}
+
+% ===========================================================================
+\section{Convention-robustness (gauge) and its limits}\label{sec:gauge}
+% ===========================================================================
+Under a per-orbital phase change $\varphi_k\to e^{i\theta_k}\varphi_k$
+(sign flips $\theta_k=\pi$ included --- the ambiguity of localized
+molecular orbitals), each RDM factor transforms as
+\[
+  d^{\dagger}_{k\sigma'}d^{\phantom\dagger}_{k\sigma}
+  \;\longrightarrow\;
+  e^{+i\theta_k}e^{-i\theta_k}\,
+  d^{\dagger}_{k\sigma'}d^{\phantom\dagger}_{k\sigma}
+  \;=\;
+  d^{\dagger}_{k\sigma'}d^{\phantom\dagger}_{k\sigma},
+\]
+so \rdm{} --- and every feature above, including the signed ones --- is
+\textbf{exactly invariant}. Verified numerically: Hubbard ring
+$\max|\Delta\rho|=4.6\times10^{-15}$; benzene CAS(6,6) with PM orbitals
+$1.2\times10^{-13}$.
+
+\emph{Limits (stated honestly):} invariance holds for a common phase on the
+spatial orbital shared by both spins. It does \emph{not} cover local
+spin-basis rotations (which redefine the computational basis) or general
+orbital \emph{rotations} --- the latter change the physical partition and
+\emph{should} change the answer (canonical vs localized benzene is real
+physics, not an artifact). Separately, localized orbitals must be
+\emph{canonicalised} (deterministic ordering + sign convention) before
+dataset generation, because localization can return the same orbitals in a
+different order --- a bookkeeping ambiguity that relabels cluster indices.
+
+% ===========================================================================
+\section{What is deliberately NOT an input}
+% ===========================================================================
+\begin{center}
+\begin{tabular}{@{}lp{8.6cm}@{}}
+\toprule
+Excluded & Reason \\
+\midrule
+$L,\,t,\,U,\,N_e$, topology & ablation: adds nothing once $\rho$ is
+  described; excluding them makes the model Hamiltonian-agnostic
+  (molecular transfer) \\
+temperature $T$ & readable from the block purities; excluding it lets one
+  model serve ground, excited and thermal states \\
+full $\rho$ entries & $4^n$ scaling breaks the single-model design;
+  archived in every record for audits and Phase-2 \\
+GCG output (bounds, histories, decompositions) & \textbf{target leakage}:
+  at prediction time no GCG output exists --- producing it is the very cost
+  the model removes \\
+eigenvalue-only (spectral) features & unitary-invariant, hence blind to
+  coherences (a GHZ state and a product state can share a spectrum); kept
+  only as a legacy comparison set \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% ===========================================================================
+\section{Summary}
+% ===========================================================================
+Each record: $\rho$ (archived) $\to$ $S_z$ blocks $\to$ per-block
+$(m_b,p_b,q_b,C_{2,b},s^{+}_b,s^{-}_b)$ $+$ optional
+$\bar R_{b,d}$ and shape features $+$ $n$ $+$ 4 global summaries $\to$ a
+fixed-length, gauge-robust vector (71/126/148) $\to$ model $\to$
+$\widehat C_{\mathrm{GME}}$, trained against GCG labels under
+group-split evaluation. Every feature has a formula, a physical meaning, and
+an empirical reason to exist; everything the features cannot see is still
+archived in the record, so the design can be revisited without recomputing
+a single label.
+\end{document}

@@ -1,0 +1,444 @@
+\documentclass[11pt]{article}
+% ---------------------------------------------------------------------------
+%  Data collected for ML-GME training, grouped by category; the FINALIZED
+%  model inputs (Sz-block features) with the ablation evidence; and the
+%  current roadmap.
+%  Compile:  pdflatex gme_ml_physics_overview.tex   (twice for TOC)
+% ---------------------------------------------------------------------------
+\usepackage[a4paper,margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs,array}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+
+\newcommand{\CGME}{\ensuremath{C_{\mathrm{GME}}}}
+\newcommand{\rdm}{\ensuremath{\Gamma^{(n)}}}
+\newcommand{\feat}{\textcolor{blue!60!black}{\textbf{Feature}}}
+\newcommand{\lab}{\textcolor{red!60!black}{\textbf{Label}}}
+\newcommand{\chk}{\textcolor{orange!70!black}{\textbf{Check}}}
+\newcommand{\meta}{\textcolor{gray}{Metadata}}
+
+\title{\textbf{The Data We Collect to Train Machine-Learning Models of
+       Genuine Multipartite Entanglement}\\[4pt]
+       \large including the finalized model inputs (July 2026)}
+\author{Hubbard-GME project}
+\date{\today}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\bigskip
+
+% ===========================================================================
+\section{The idea in one paragraph}
+% ===========================================================================
+The exact GME of a mixed reduced density matrix \rdm{} requires an expensive
+convex-roof optimisation (seconds to minutes per state). We therefore compute
+it exactly, once, for many physically diverse states, record everything about
+each state, and train a model that predicts \CGME{} directly from cheap
+properties of \rdm. Each \textbf{record} in the dataset = one reduced density
+matrix + everything known about it. The fields fall into six categories,
+listed below. Every field carries one of four roles:
+
+\begin{center}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\feat{}  & input given to the ML model (finalized set: Section~\ref{sec:final}) \\
+\lab{}   & the target the model must predict \\
+\chk{}   & used only to verify the label (never shown to the model) \\
+\meta{}  & recorded for bookkeeping / physics interpretation, not fed to the model \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent\textbf{Storing $\ne$ feeding.} We deliberately store far more than
+the model sees (Hamiltonian, spectra, solver histories, decompositions). The
+extra material is used for auditing, label-quality weighting and later
+research stages --- but the model's \emph{inputs} are restricted to what is
+computable from \rdm{} alone, so that the trained model transfers to any
+system that can provide an RDM (molecules, larger lattices, experiment).
+
+% ===========================================================================
+\section{Category 1 --- System (which Hamiltonian)}
+% ===========================================================================
+Defines the physical system: $L$ sites on a ring, $N_e$ electrons, hopping
+$t$, on-site repulsion $U$; the physical regime is set by $U/t$ (weak
+coupling $\to$ crossover $\to$ strong coupling), sampled densest in the
+crossover.
+
+\begin{center}
+\begin{tabular}{@{}llp{8.6cm}@{}}
+\toprule
+Field & Role & Meaning \\ \midrule
+$L$        & \meta{} & number of lattice sites \\
+$t$        & \meta{} & hopping amplitude \\
+$U$        & \meta{} & on-site interaction \\
+$U/t$      & \meta{} & coupling ratio --- the regime indicator \\
+$N_e$      & \meta{} & electron number (half filling, $N_e=L$) \\
+mode       & \meta{} & lattice topology (ring, open chain, \dots) \\
+sector     & \meta{} & spin subspace used ($S_z{=}0$ or full) \\
+\bottomrule
+\end{tabular}
+\end{center}
+\textbf{Finalized decision:} all system fields are \emph{metadata only}. The
+ablation (Section~\ref{sec:final}) showed that, once the RDM is described
+properly, Hamiltonian parameters add nothing ($R^2$ unchanged) --- and alone
+they are far worse (MAE $0.182$ vs $0.005$). Excluding them also makes the
+model applicable to systems with entirely different Hamiltonians (molecules).
+
+% ===========================================================================
+\section{Category 2 --- State (which eigenstate it came from)}
+% ===========================================================================
+Each Hamiltonian is diagonalised once; the ground state \emph{and} low-lying
+excited states are all used (free by-products with different spin characters).
+
+\begin{center}
+\begin{tabular}{@{}llp{8.6cm}@{}}
+\toprule
+Field & Role & Meaning \\ \midrule
+state index          & \meta{} & 0 = ground state, 1,2,\dots = excited \\
+energy $E_m$         & \meta{} & energy of the source eigenstate \\
+gap $E_1{-}E_0$      & \meta{} & natural temperature scale of the system \\
+$\langle S^2\rangle,\ S$, multiplicity & \meta{} & total-spin character \\
+$S_z$                & \meta{} & spin projection \\
+double occupancy     & \meta{} & distance from the weak-coupling limit \\
+\bottomrule
+\end{tabular}
+\end{center}
+These fields say \emph{where the RDM came from}; they support interpretation
+and auditing, and are never model inputs.
+
+% ===========================================================================
+\section{Category 3 --- RDM (the raw material of the model input)}
+% ===========================================================================
+Pick $n$ sites, trace out the rest: the $2^n\times2^n$ reduced density matrix
+\rdm. Diagonal = probabilities of local spin configurations; off-diagonal =
+quantum coherences. Because the parent states conserve $S_z$, every RDM is
+exactly \textbf{block-diagonal in total $S_z$} (verified to machine precision
+across the dataset): all non-zero structure lives inside $n{+}1$ blocks of
+sizes $\binom{n}{k}$. The finalized inputs are summaries of these blocks
+(Section~\ref{sec:final}); the matrix itself is stored in full.
+
+\begin{center}
+\begin{tabular}{@{}llp{8.2cm}@{}}
+\toprule
+Field & Role & Meaning \\ \midrule
+$n$ (cluster size)     & \feat{} & sets the entanglement order and the block
+                         layout ($2^n$, blocks $\binom{n}{k}$) \\
+\textbf{$S_z$-block features of $\rho$} & \feat{} & \textbf{the finalized
+  input} --- per-block populations, coherence strengths, signed coherences,
+  block purities + global coherence statistics
+  (Section~\ref{sec:final}) \\
+$\rho$ (real + imag)   & \meta{} (stored) & full matrix, kept in every record;
+  source of all features; needed for the later decomposition-predicting
+  model \\
+eigenvalues, purity, entropy, $\mathrm{Tr}\rho^3$, rank & \meta{}
+  (legacy features) & the original spectral feature set --- superseded by the
+  block features (they are unitary-invariant and blind to coherences), kept
+  for comparison \\
+sites                  & \meta{} & which cluster was kept \\
+is\_pure               & \meta{} & selects exact pure formula vs convex roof \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% ===========================================================================
+\section{Category 4 --- Thermal (finite temperature)}
+% ===========================================================================
+At $T>0$ the system is a Gibbs mixture: $\rdm(T)=\sum_m p_m(T)\rdm[\psi_m]$
+with $p_m(T)\propto e^{-(E_m-E_0)/T}$. The per-eigenstate RDMs are
+temperature-independent; only the mixing weights depend on $T$, so one
+diagonalisation yields the whole temperature sweep. Thermal records provide
+the essential non-entangled ($\CGME\approx0$) examples for class balance.
+
+\begin{center}
+\begin{tabular}{@{}llp{8.6cm}@{}}
+\toprule
+Field & Role & Meaning \\ \midrule
+$T$            & \meta{} & temperature of the Gibbs mixture (0 = pure state) \\
+thermal flag   & \meta{} & is this record a thermal mixture? \\
+\bottomrule
+\end{tabular}
+\end{center}
+\textbf{Finalized decision:} $T$ is also metadata now --- the block features
+read the degree and structure of thermal mixing directly off $\rho$ (block
+purities and coherence strengths), so the temperature label itself is not
+needed as an input; the final model achieved $R^2=0.999$ on a test set
+containing thermal records without ever seeing $T$.
+
+% ===========================================================================
+\section{Category 5 --- GCG label (the answer to learn)}
+% ===========================================================================
+Every RDM is labelled by the GCG convex-roof solver:
+$\CGME=\min\sum_i p_i\,C(\phi_i)$ over all pure-state decompositions of
+$\rho$ --- the ``least entangled explanation'' of the mixture.
+
+\begin{center}
+\begin{tabular}{@{}llp{8.2cm}@{}}
+\toprule
+Field & Role & Meaning \\ \midrule
+$C_{\mathrm{target}}$ ($=C_{\mathrm{gcg}}$) & \lab{} & the GME value; the
+  training target \\
+supervisor's analytic lower bound & \chk{} & label must not fall below it;
+  also the physics baseline the model must beat \\
+upper bound          & \chk{} & label must not exceed it \\
+GCG convergence history, restart spread & \meta{} (stored) & label-quality
+  information; candidate \emph{sample weights} during training (never
+  inputs) \\
+optimal decompositions (unitaries) & \meta{} (stored) & kept for the planned
+  decomposition-predicting model (Phase 2), where they become training
+  \emph{targets} --- never inputs \\
+solver status        & \meta{} & pure formula vs convex roof, convergence \\
+\bottomrule
+\end{tabular}
+\end{center}
+Nothing derived from the GCG run may ever be an input: at prediction time a
+new state has no GCG output --- producing it \emph{is} the expensive step the
+model replaces. (A test set cannot catch this kind of leakage: the leaked
+column would be present in test rows too and the metrics would look perfect
+while meaning nothing.)
+
+% ===========================================================================
+\section{Category 6 --- Provenance (where each record came from)}
+% ===========================================================================
+\begin{center}
+\begin{tabular}{@{}llp{8.6cm}@{}}
+\toprule
+Field & Role & Meaning \\ \midrule
+config hash   & \meta{} & unique ID of the physics point
+  $(L,t,U,\text{state})$ --- \textbf{the honest train/test group split is
+  made on this} \\
+source / sweep tag & \meta{} & which computation produced the record \\
+full config   & \meta{} & complete parameter set, for reproducibility \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% ===========================================================================
+\section{The finalized model input (decision of 2026-07-13)}\label{sec:final}
+% ===========================================================================
+
+\subsection{The exact input vector}
+The model receives \textbf{49 numbers}, all computed from $\rho$ in
+microseconds, with no solver and no Hamiltonian information:
+
+\begin{center}
+\begin{tabular}{@{}lp{9.6cm}@{}}
+\toprule
+Input & Description \\ \midrule
+$n$ & cluster size (fixes $2^n$ and the block layout) \\
+per-$S_z$-block, for each of the $n{+}1$ blocks (padded to 11 slots,
+  $b_0\ldots b_{10}$ --- design cap $n\le10$): & \\
+\quad block population & trace of the block = probability of that $S_z$
+  sector \\
+\quad block coherence strength & norm of the block's off-diagonal part ---
+  \emph{where the entanglement lives} \\
+\quad block signed coherence & sum of real parts: singlet ($-$) vs triplet
+  ($+$) spin-coupling character \\
+\quad block purity & mixedness of the block \\
+4 global coherence statistics & total off-diagonal norm, largest element,
+  most negative, most positive \\
+\bottomrule
+\end{tabular}
+\end{center}
+Total: $1+4\times11+4=49$. For a record with cluster size $n$, only the first
+$n{+}1$ block slots are informative; the rest are zero (padding keeps one
+fixed-length format for all $n$, so a single model serves every order and
+future $n=7\ldots10$ records slot in without any format change). The raw
+matrix $\rho$ itself is \emph{not} passed; it is stored and used only to
+compute these numbers. No $L$, no $t$, no $U$, no $T$.
+
+\subsection{The evidence (ablation, HistGBM, group split by Hamiltonian,
+2{,}014 train / 675 test)}
+\begin{center}
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+Input set & MAE & $R^2$ & Det.\ acc & MAE ($n{=}3$) & $R^2$ ($n{=}3$) \\
+\midrule
+Hamiltonian parameters only          & 0.182 & 0.617 & 0.799 & --- & --- \\
+Spectral RDM features (previous)     & 0.044 & 0.931 & 0.956 & 0.091 & 0.692 \\
+\textbf{$S_z$-block features (final)} & \textbf{0.005} & \textbf{0.999} &
+  0.967 & \textbf{0.009} & \textbf{0.997} \\
+spectral $+$ block (no gain)         & 0.007 & 0.999 & 0.969 & 0.007 & 0.998 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Three conclusions.
+\begin{enumerate}[nosep]
+  \item \textbf{The RDM carries all the signal; the Hamiltonian adds
+        nothing.} Parameters alone barely beat the analytic physics baseline;
+        added on top of RDM features they change nothing.
+  \item \textbf{Coherences are decisive.} The previous spectral features are
+        unitary-invariant and therefore blind to the off-diagonal coherences
+        --- precisely where entanglement lives (a product state and a GHZ
+        state share a spectrum). Adding the $S_z$-block coherence features
+        cut the error $8\times$ and \emph{resolved the $n=3$ regime}
+        ($R^2$: $0.69\to0.997$), previously the weakest point.
+  \item \textbf{Symmetry made the features compact.} The verified $S_z$
+        superselection (cross-block elements $=0$ exactly) means all
+        information sits in $n{+}1$ small blocks; summarising per block wastes
+        no dimensions on entries known to vanish.
+\end{enumerate}
+
+\subsection{Tasks and models (unchanged)}
+Detection (is $\CGME>\varepsilon$?) and estimation (the value of \CGME).
+Models: logistic/ridge regression (linear baseline), random forest,
+gradient-boosted trees (HistGBM --- current best); planned: MLP, and a
+quantum kernel/variational classifier at equal feature budget. Every
+regressor is compared against the physics baseline (the supervisor's analytic
+lower bound used as a predictor).
+
+\subsection{Honest evaluation (unchanged)}
+Group split by Hamiltonian (via the config hash); extrapolation tests: train
+small $L$ $\to$ test larger $L$; train $T{=}0$ $\to$ test thermal; train
+moderate $U/t$ $\to$ test extremes; and the production test: train on Hubbard
+RDMs $\to$ predict \emph{molecular} (benzene CAS) cluster RDMs.
+
+% ===========================================================================
+\section{What we collect for every body order $n=2\ldots10$}\label{sec:pern}
+% ===========================================================================
+Every record, at every $n$, is collected the same way and carries the same
+49-slot feature vector; what changes with $n$ is the size of $\rho$, the
+$S_z$-block layout, the cost of the GCG label, and the physical question the
+cluster probes.
+
+\subsection{The master table}
+\begin{center}
+\small
+\begin{tabular}{@{}ccp{2.9cm}cccl@{}}
+\toprule
+$n$ & $\rho$ size & $S_z$-block sizes $\binom{n}{k}$ & informative
+  features & GCG label cost & source & status \\
+\midrule
+2  & $4\times4$      & 1,2,1                   & 17 & trivial   & $L\ge2$ banks & \textbf{collecting now} \\
+3  & $8\times8$      & 1,3,3,1                 & 21 & seconds   & $L\ge4$ banks & \textbf{collecting now} \\
+4  & $16\times16$    & 1,4,6,4,1               & 25 & seconds   & $L\ge4$ banks & \textbf{collecting now} \\
+5  & $32\times32$    & 1,5,10,10,5,1           & 29 & $\sim$10\,s & $L\ge6$ banks & \textbf{collecting now} \\
+6  & $64\times64$    & 1,6,15,20,15,6,1        & 33 & minutes   & $L\ge6$ banks & \textbf{collecting now} \\
+7  & $128\times128$  & 1,7,21,35,35,21,7,1     & 37 & tens of min & $L{=}8$ banks & HPC (deferred) \\
+8  & $256\times256$  & 1,8,28,56,70,56,28,8,1  & 41 & hours     & $L{=}8$ banks & HPC (deferred) \\
+9  & $512\times512$  & 1,9,36,84,126,126,84,36,9,1 & 45 & hours+ & $L{\ge}9$: DMRG-obtained $\rho$ & future \\
+10 & $1024\times1024$& 1,10,45,120,210,252,210,120,45,10,1 & 49 & hours+ &
+  $L{\ge}10$: DMRG-obtained $\rho$ & future \\
+\bottomrule
+\end{tabular}
+\end{center}
+``Informative features'' $=1+4(n{+}1)+4$: the $n$ value, four numbers per
+occupied block slot, four global coherence statistics; the remaining slots of
+the 49 are zero. The feature \emph{extraction} is microseconds at every $n$
+(even a $1024\times1024$ matrix); it is only the \emph{label} (the GCG convex
+roof) whose cost climbs with dimension --- which is precisely why the labels
+are worth amortising into a trained model.
+
+\subsection{How each record is collected (identical recipe at every $n$)}
+\begin{enumerate}[nosep]
+  \item \textbf{Take a cached RDM bank} (one per Hamiltonian and sector; it
+        stores the per-eigenstate RDMs $\rdm[\psi_m]$ for all its body
+        orders).
+  \item \textbf{Form the state at each temperature} of the grid
+        $T\in\{0,\,0.1,\,0.25,\,0.5,\,1,\,2\}$: $T{=}0$ is the ground state
+        (or ground manifold); $T{>}0$ is the Boltzmann mixture
+        $\sum_m p_m(T)\rdm[\psi_m]$, normalised.
+  \item \textbf{Label it with GCG} (8 restarts; the pure-state formula is
+        used automatically when the state is pure, e.g.\ $n{=}L$ at $T{=}0$).
+  \item \textbf{Store the record}: full $\rho$ + configuration + label in one
+        \texttt{.npz}; one row (features + hyperlink to the \texttt{.npz}) in the
+        feature table.
+\end{enumerate}
+One bank therefore yields (\#body orders)$\times$(6 temperatures) records,
+and the same $n$ is collected from \emph{different} $L$ (e.g.\ $n=3$ clusters
+out of $L=4,6,8$) --- deliberately, so the model sees the same entanglement
+order embedded in environments of different size.
+
+\subsection{Why each $n$ is collected (the physics of the ladder)}
+\begin{description}[nosep]
+  \item[$n=2$ --- the anchor.] Pairwise entanglement; for the Hubbard ring
+        the two-site RDM is Werner-like and GCG reproduces the \emph{exact}
+        Wootters concurrence, so every $n{=}2$ label is analytically
+        verifiable. Cheapest, most abundant records; calibrates the model and
+        the pipeline.
+  \item[$n=3$ --- the first genuine multipartite order.] The smallest cluster
+        whose entanglement cannot be reduced to pairs; the standard object of
+        molecular tripartite studies (all $\binom{6}{3}$ CAS clusters of
+        benzene); empirically the hardest regime for ML --- the block
+        features were adopted precisely because they resolved it
+        ($R^2\,0.69\to0.997$).
+  \item[$n=4,5$ --- the interior of the ladder.] Intermediate orders where
+        GME can \emph{grow} with cluster size (localized benzene: all six
+        $n{=}5$ clusters uniformly entangled) or die (canonical basis) ---
+        the regime that discriminates basis and coupling effects; moderate
+        label cost, good volume.
+  \item[$n=6$ --- whole-system physics at $L=6$.] For $L{=}6$ this is the
+        full ring: pure at $T{=}0$ (exact pure-state label, purity $=1$),
+        strongly mixed at $T{>}0$ --- the cleanest controlled path from pure
+        to mixed. Dominates the current ingestion cost ($64\times64$ GCG).
+  \item[$n=7,8$ --- the heavy orders ($L=8$).] Available in the cached $L=8$
+        banks (the per-$n$ Lyra runs); $128/256$-dimensional convex roofs at
+        high thermal rank make the \emph{labels} HPC-scale, so they are
+        deferred to the cluster. Physically they extend the whole-ring story
+        ($n{=}L{=}8$) and the near-whole-ring one ($n=7$).
+  \item[$n=9,10$ --- beyond exact diagonalisation.] No full-spectrum bank can
+        exist at $L=10$ ($\sim$TB scale); the plan is to obtain the RDMs from
+        DMRG/tensor-network ground states (which never diagonalise the full
+        Hamiltonian), label a modest number with GCG, and use them purely as
+        an \emph{extrapolation test set}: does a model trained on $n\le8$
+        predict entanglement at orders it has never seen? The 49-slot format
+        already accommodates them.
+\end{description}
+
+\subsection{Why the same feature recipe works at every $n$}
+The three ingredients scale gracefully: (i) the $S_z$ superselection holds at
+every $n$ (blocks $\binom{n}{k}$, cross-block elements exactly zero), so the
+per-block summaries remain the physically complete compression; (ii) the
+feature count grows only \emph{linearly} with the cap ($+4$ per extra block)
+while $\rho$ grows exponentially ($4^n$ entries), so the compression ratio
+improves with $n$; (iii) extraction cost stays negligible at every $n$, so
+the trained model's prediction cost is flat even where the exact label would
+take hours.
+
+% ===========================================================================
+\section{Current path (roadmap)}
+% ===========================================================================
+\begin{enumerate}[nosep]
+  \item \textbf{Integrate the $S_z$-block features} into the training code as
+        the standard representation (spectral set kept as a comparison).
+  \item \textbf{Stress tests} with the final features: hold-out-$L$,
+        hold-out-thermal, and hard-band detection (records within $0.05$ of
+        the threshold) --- the remaining honesty checks on the $R^2=0.999$
+        result.
+  \item \textbf{Scale the dataset}: GCG-label the full RDM-bank grid
+        (all $L$, $t$, $U$, both sectors, several temperatures) --- thousands
+        of new records, fixing class balance with hot thermal states.
+  \item \textbf{Production test}: predict the benzene CAS$(6,6)$ cluster
+        \CGME{} (canonical and PM-localized) with the Hubbard-trained model
+        and compare against the stored GCG labels --- the Hubbard\,$\to$\,%
+        molecule transfer that, per our literature review, no existing work
+        has attempted.
+  \item \textbf{Phase 2 (outlook)}: the decomposition-predicting model
+        (amortized convex roof): input $\rho$, output a pure-state
+        decomposition + \CGME{}, pretrained on the stored GCG decompositions
+        and fine-tuned on the differentiable convex-roof objective. Its
+        output is verifiable (any decomposition gives a certified upper
+        bound) and provides warm starts for GCG. The stored decompositions
+        and histories become training \emph{targets} there --- still never
+        inputs.
+\end{enumerate}
+
+% ===========================================================================
+\section{Summary}
+% ===========================================================================
+One record $=$ one reduced density matrix, with six field categories:
+\textbf{System}, \textbf{State}, \textbf{RDM}, \textbf{Thermal},
+\textbf{GCG label}, \textbf{Provenance}. Everything is stored; the model sees
+only the finalized 49-slot input --- $n$ plus the $S_z$-block and coherence
+numbers computed from $\rho$ alone (design cap $n\le10$;
+Section~\ref{sec:pern}). This choice is ablation-proven
+($8\times$ lower error, $n{=}3$ solved), physics-motivated (coherences carry
+the entanglement; $S_z$ superselection shapes the features), and
+transfer-ready (no Hamiltonian- or temperature-specific inputs), setting up
+the molecular production test and, later, the decomposition-predicting
+Phase~2 model.
+
+\end{document}

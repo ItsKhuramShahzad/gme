@@ -1,0 +1,49 @@
+Estimation of Genuine Multipartite Entanglement in Half-Filled Hubbard Rings
+
+Khuram Shahzad and Guido Goldoni
+University of Modena and Reggio Emilia (UNIMORE),
+Department of Physics, Informatics and Mathematics
+
+Genuine multipartite entanglement (GME) is a central resource for quantum
+technologies and a sensitive probe of many-body correlations. In
+itinerant-electron systems it is hard to quantify, because charge
+fluctuations, subsystem reduction, and temperature produce mixed spin states.
+Here we investigate spin GME in finite, half-filled Hubbard rings.
+
+We solve the Hubbard model -- nearest-neighbour hopping t, on-site Coulomb
+repulsion U -- by exact diagonalization for rings of N = 2-8 sites at half
+filling (N electrons, periodic boundary conditions), in both the Sz = 0 sector
+and the full fixed-particle-number Hilbert space.
+
+From a correlated eigenstate |Psi> we choose a cluster of n sites (n <= N) and
+trace out the remaining N-n sites to obtain their reduced density matrix
+rho_n. Projecting each selected site onto single occupation (projector P) and
+renormalizing gives the n-spin reduced density matrix
+Gamma^(n) = P rho_n P / Tr(P rho_n P), a 2^n x 2^n matrix on the local spin
+configurations {up,down}^n. This isolates the spin degrees of freedom from the
+charge while preserving the fermionic symmetries; Gamma^(n) is Hermitian,
+positive semidefinite, and unit-trace. Finite-temperature states follow as
+Gibbs mixtures of the eigenstate matrices.
+
+For a pure state, GME is quantified by the genuinely multipartite concurrence:
+the weakest bipartite entanglement over all bipartitions A|B of the cluster,
+C_GME = min_{A|B} sqrt( 2 [ 1 - Tr(rho_A^2) ] ), where rho_A is the reduced
+state of part A. The extracted and thermal states are generally mixed, so
+their GME is defined through the convex-roof extension,
+C_GME(rho) = min sum_i p_i C_GME(phi_i) over all pure-state decompositions
+rho = sum_i p_i |phi_i><phi_i|. This non-convex optimization uses a
+generalized conjugate-gradient method on the unitary group, cross-checked by a
+Stiefel-manifold parametrization.
+
+We map C_GME as a function of cluster size n, coupling ratio t/U, temperature
+T, and ring size N. Ground-state GME grows with cluster size, approaching its
+maximum for the whole ring; temperature suppresses it on a scale set by the
+spectral gap, so entanglement survives to higher T for larger t/U; near
+separability, thermal population of entangled excited states can instead
+activate GME. For n = 2 the measure reduces exactly to the Wootters
+concurrence, an analytic benchmark.
+
+This framework links correlated electronic structure to effective spin
+entanglement, clarifying how genuine multipartite correlations respond to
+interactions, subsystem reduction, and temperature; the same construction
+extends to molecular pi systems such as benzene.

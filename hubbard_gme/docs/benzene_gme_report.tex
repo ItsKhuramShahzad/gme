@@ -1,0 +1,311 @@
+\documentclass[11pt]{article}
+% ---------------------------------------------------------------------------
+%  Genuine multipartite entanglement in benzene: canonical vs localized
+%  orbitals, thermal behaviour, and validation.
+%  Compile:  pdflatex benzene_gme_report.tex   (twice for TOC/refs)
+% ---------------------------------------------------------------------------
+\usepackage[a4paper,margin=2.3cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs,array}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+
+\newcommand{\code}[1]{\texttt{\small #1}}
+\newcommand{\CGME}{\ensuremath{C_{\mathrm{GME}}}}
+\newcommand{\rdm}{\ensuremath{\Gamma^{(n)}}}
+
+\title{\textbf{Genuine Multipartite Entanglement in a Molecular System:\\
+       the Benzene $\pi$ System}}
+\author{Khuram Shahzad}
+\date{\today}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\bigskip
+
+% ===========================================================================
+\section{Introduction}
+% ===========================================================================
+In previous work we computed the genuine multipartite entanglement (GME)
+measure \CGME{} for the one-dimensional Hubbard ring at several system sizes
+$L$, both for the ground state and for thermal (Gibbs) states. Here we extend
+the same analysis to a real molecular system. Although the pipeline supports a
+benchmark set of thirteen molecules, this report focuses on a single, physically
+transparent case: \textbf{benzene} (C$_6$H$_6$) with the $\pi$-system active
+space CAS$(6,6)$.
+
+Benzene is the natural first molecular target because its six $\pi$ electrons
+in six $\pi$ orbitals form the textbook molecular analogue of the
+\emph{half-filled six-site Hubbard ring} studied before: one orbital per carbon
+atom, arranged on a ring. This allows a direct, like-for-like comparison
+between the model system and a real molecule. The report addresses three
+questions:
+\begin{enumerate}[nosep]
+  \item How much genuine $n$-partite entanglement ($n=3,4,5$) does the benzene
+        ground state carry?
+  \item How does the answer depend on the \emph{orbital basis} --- canonical
+        (delocalized) versus localized orbitals --- a question raised in the
+        supervision discussion?
+  \item How does the entanglement respond to temperature (Gibbs mixing of
+        excited states)?
+\end{enumerate}
+
+% ===========================================================================
+\section{Methodology}\label{sec:method}
+% ===========================================================================
+
+\subsection{System and active space}
+Geometry and active space are taken from the curated VQE-benchmark dataset
+(\code{molecules\_data.py}, basis \code{cc-pVDZ}). A restricted Hartree--Fock
+calculation (PySCF) yields the molecular orbitals; the 18 lowest orbitals
+(the $\sigma$ framework and cores) are frozen as a doubly-occupied core and the
+next six orbitals --- the $\pi$ system --- are kept active:
+CAS$(6,6)$, i.e.\ 6 electrons in 6 orbitals, Hilbert dimension
+$\binom{6}{3}^2=400$ in the $S_z=0$ sector.
+
+The active-space Hamiltonian is built with OpenFermion+PySCF as a number- and
+spin-preserving sparse operator and diagonalised exactly (\code{eigsh}). Key
+ground-state data:
+\begin{center}
+\begin{tabular}{@{}ll@{}}
+\toprule
+HF energy                    & $-230.718789$~Ha \\
+CASCI ground-state energy $E_0$ & $-230.753558$~Ha \\
+First excitation gap $E_1-E_0$  & $0.17530$~Ha \\
+Spin                         & singlet ($\langle S^2\rangle=0$) \\
+\bottomrule
+\end{tabular}
+\end{center}
+These active spaces are exactly those optimised in the CUDA-Q VQE benchmark,
+whose records show $|E_{\mathrm{VQE}}-E_{\mathrm{CASCI}}|\sim10^{-14}$~Ha ---
+the exact diagonalisation used here produces the same correlated state that the
+VQE targets.
+
+\subsection{Two orbital bases: canonical and localized}\label{sec:bases}
+The GME analysis is carried out in \emph{two} orbital bases.
+
+\paragraph{Canonical (delocalized).}
+The six active orbitals as delivered by RHF: the benzene $\pi$ stack
+$a_{2u},\,e_{1g}\,(\times2),\,e_{2u}\,(\times2),\,b_{2g}$, each delocalized over
+the whole ring and ordered by orbital energy. Orbital index $i$ refers to the
+$i$-th active orbital in this energy ordering.
+
+\paragraph{Pipek--Mezey localized.}
+The same six-orbital space after a Pipek--Mezey (PM) unitary rotation. PM
+maximises the atomic concentration of each orbital and preserves the
+$\sigma/\pi$ separation. With a fourth-power PM functional and a multi-start
+optimisation (the localizer is non-convex), the procedure converges to the
+fully symmetric solution: \textbf{six equivalent atomic-like $p_z$ orbitals,
+one per carbon}, each carrying $\approx42\%$ L\"owdin weight on its home carbon
+(the remainder spills onto the neighbouring atoms --- the irreducible aromatic
+delocalization). In this basis, orbital index $i$ means \emph{the $\pi$ orbital
+of carbon $i$}: benzene becomes, orbital-wise, a six-site ring.
+
+\paragraph{What changes and what does not.}
+Localization is a unitary rotation \emph{within} the active space: the ground
+state, its energy and the gap are strictly invariant (verified numerically:
+identical $E_0$ in both bases). What changes is the \emph{tensor-product
+partition} into orbitals --- and therefore the reduced density matrices and the
+entanglement between them. \CGME{} is a property of a state \emph{and} a chosen
+partition; comparing the two bases is thus physically meaningful, not
+redundant: the canonical numbers measure entanglement between delocalized
+molecular-orbital modes, the localized numbers between \emph{atomic sites},
+directly comparable to the Hubbard ring.
+
+A useful diagnostic of the basis change is the total double occupancy
+$\langle\sum_j n_{j\uparrow}n_{j\downarrow}\rangle$ over the active orbitals:
+\[
+  \langle D\rangle_{\mathrm{canonical}} = 2.96 \qquad\longrightarrow\qquad
+  \langle D\rangle_{\mathrm{localized}} = 1.33 .
+\]
+In the canonical basis the state is close to the RHF determinant (three doubly
+occupied $\pi$ MOs, $\langle D\rangle\!\approx\!3$); in the localized (site)
+basis the correlated $\pi$ electrons partially avoid double occupancy, exactly
+as in a moderately interacting Hubbard ring.
+
+\subsection{$n$-body reduced density matrices and their validation}
+For every cluster of $n$ orbitals ($n=3,4,5$; all $\binom{6}{n}$ combinations)
+the interleaved $n$-body spin RDM is assembled element-by-element,
+$\rho[\mathrm{bra},\mathrm{ket}]
+ =\langle\psi_0|\,\hat O_{\mathrm{bra,ket}}\,|\psi_0\rangle$,
+where $\hat O$ is a product of one creation--annihilation pair per cluster
+orbital (both acting on the \emph{same} orbital, so no inter-orbital hopping is
+involved). The result is a $2^n\times2^n$ matrix over the spin configurations
+of the cluster, normalised to unit trace. Its diagonal contains spin-configuration
+populations; the off-diagonal elements are spin coherences whose signs encode
+singlet ($-$) versus triplet ($+$) two-orbital couplings.
+
+\paragraph{$S_z$ superselection check.}
+Since $|\psi_0\rangle$ lies in the $S_z=0$ sector, every reduced state must be
+block-diagonal in the cluster's total $S_z$: coherences between spin
+configurations of different $S_z$ (e.g.\
+$\langle\!\uparrow\uparrow\downarrow\!|\rho|\!\downarrow\downarrow\uparrow\!\rangle$)
+must vanish identically. This was verified explicitly over \emph{all} stored
+molecular RDMs: the largest cross-$S_z$ matrix element is $0$ to machine
+precision. The RDM heatmap pages now include an $S_z$-ordered view in which
+this block structure is manifest.
+
+\paragraph{The $n=6$ (whole-active-space) case.}
+The interleaved \emph{spin} RDM presumes each cluster orbital is singly
+occupied. For $n=6$ in the canonical basis the probability that all six MOs are
+simultaneously singly occupied is numerically zero
+($\langle D\rangle\!\approx\!3$: bonding MOs are doubly occupied), so the
+$n{=}6$ spin RDM is ill-defined there and is skipped by construction. In the
+localized basis single occupancy is far more probable
+($\langle D\rangle=1.33$), and the $n=6$ analysis becomes meaningful; it is
+left as a next step.
+
+\subsection{GME measure and thermal states}
+For mixed RDMs, \CGME{} is evaluated as the convex roof
+$C(\rho)=\min_{\{p_i,\psi_i\}}\sum_i p_i\,C(\psi_i)$, minimised with the GCG
+solver over decompositions of increasing rank with several random restarts; the
+pure-state formula is used when $\mathrm{Tr}\,\rho^2\approx1$. Analytic
+lower/upper bounds are stored alongside for the audit's bracket check.
+
+Thermal states are Gibbs mixtures over the $k=10$ lowest eigenstates,
+\[
+  \rdm(T)=\sum_{m} p_m(T)\,\rdm[\psi_m],\qquad
+  p_m(T)=\frac{e^{-(E_m-E_0)/T}}{\sum_{m'}e^{-(E_{m'}-E_0)/T}},
+\]
+with $k_B=1$ and $T$ in Hartree, on the grid $T\in[0,0.3]$~Ha (16 points). The
+relevant scale is the gap, $E_1-E_0=0.175$~Ha, so the window spans from the
+pure ground state to strong mixing of the low-lying excited configurations.
+
+% ===========================================================================
+\section{Results}\label{sec:results}
+% ===========================================================================
+
+\subsection{Ground-state GME: canonical versus localized orbitals}
+Table~\ref{tab:t0} summarises \CGME{} at $T=0$ for every body order, in both
+bases (statistics over all $\binom{6}{n}$ clusters).
+
+\begin{table}[h!]
+\centering
+\caption{Ground-state ($T=0$) GME of benzene CAS$(6,6)$ per body order $n$,
+in the canonical (delocalized) and Pipek--Mezey localized bases.
+``\#GME'' counts clusters with $\CGME>0.05$.}\label{tab:t0}
+\begin{tabular}{@{}c c ccc c ccc@{}}
+\toprule
+ & & \multicolumn{3}{c}{\textbf{Canonical}} & \phantom{x} &
+     \multicolumn{3}{c}{\textbf{Localized (PM)}} \\
+\cmidrule{3-5}\cmidrule{7-9}
+$n$ & \#clusters & $\max\CGME$ & mean & \#GME & &
+      $\max\CGME$ & mean & \#GME \\
+\midrule
+3 & 20 & 0.074 & 0.009 & 2 & & 0.006 & 0.002 & 0 \\
+4 & 15 & 0.108 & 0.018 & 1 & & 0.221 & 0.058 & 3 \\
+5 &  6 & 0.000 & 0.000 & 0 & & 0.128 & \textbf{0.123} & \textbf{6} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent\textbf{Finding 1: the two bases give qualitatively different --- and
+complementary --- pictures.} In the \emph{canonical} basis the entanglement is
+modest and confined to small clusters (best $n{=}3$ cluster $0.074$, best
+$n{=}4$ cluster $0.108$), and vanishes identically for all $n{=}5$ clusters.
+In the \emph{localized} basis the pattern inverts: three-site clusters are
+essentially separable, four-site clusters reach $0.221$, and \textbf{every}
+five-site cluster is genuinely multipartite entangled, with a remarkably
+uniform value ($\mathrm{mean}=0.123$, $\max=0.128$ --- the six clusters are
+symmetry-equivalent up to the site removed).
+
+\textbf{Finding 2: in the localized (atomic-site) basis, benzene behaves like
+the half-filled Hubbard ring.} GME that \emph{grows} with cluster size, uniform
+values across symmetry-equivalent clusters, and suppressed double occupancy
+($\langle D\rangle=1.33$) are precisely the fingerprints observed in the $L=6$
+Hubbard ground state at moderate coupling. This supports the physical picture
+of the benzene $\pi$ system as an effective six-site ring of correlated
+spins --- and confirms that the \emph{site-local} basis is the one in which the
+multipartite structure of aromatic correlation is visible. The canonical basis,
+being close to the RHF determinant ($\langle D\rangle\approx3$), hides most of
+it.
+
+\subsection{Thermal GME (canonical basis)}
+Table~\ref{tab:thermal} shows the evolution of the strongest cluster per body
+order under Gibbs mixing (canonical basis; localized thermal runs are queued as
+a next step).
+
+\begin{table}[h!]
+\centering
+\caption{Thermal GME of benzene CAS$(6,6)$ (canonical basis): the maximum
+\CGME{} over clusters at the ends of the temperature window, and the observed
+peak. $k=10$ eigenstates, $T$ in Hartree ($k_B{=}1$), gap $=0.175$~Ha.}
+\label{tab:thermal}
+\begin{tabular}{@{}c cccc l@{}}
+\toprule
+$n$ & $\max\CGME(0)$ & $\max\CGME(0.3)$ & peak & at $T$ & strongest cluster \\
+\midrule
+3 & 0.074 & 0.447 & 0.447 & 0.30 & $(2,3,4)$ \\
+4 & 0.108 & \textbf{0.769} & \textbf{0.769} & 0.30 & $(1,2,3,4)$ \\
+5 & 0.000 & 0.026 & 0.037 & 0.14 & $(0,1,2,3,5)$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent\textbf{Finding 3: thermal mixing \emph{creates} multipartite
+entanglement among the canonical orbitals.} Unlike the Hubbard ring at small
+$t/U$ --- where heating monotonically destroys the ground-state GME --- the
+benzene canonical-basis \CGME{} \emph{rises} steeply with temperature, from
+$0.108$ to $0.769$ ($n{=}4$) across the window. The mechanism is the same as
+the weak thermal enhancement seen for near-separable Hubbard states: the $T=0$
+state is close to a single determinant in this basis (nearly separable), and
+the Gibbs admixture of low-lying excited configurations (the window spans
+$\sim\!1.7\times$ the gap) generates strong multi-orbital correlations. It is a
+reminder that ``thermal death of entanglement'' presupposes an entangled ground
+state; a near-product ground state can only gain. (Note $T=0.3$~Ha is an
+enormous physical temperature $\sim\!10^5$~K; the Gibbs state is used here as a
+controlled family of mixed states parameterised by the gap, not as an
+experimentally reachable regime.)
+
+\subsection{Numerical floor}
+GCG runs with a bounded iteration budget, so near-separable RDMs return a small
+positive residual ($\CGME\sim10^{-2}$) rather than exactly zero; the audit's
+bracket check flags these as \textsc{warn}. All qualitative statements above
+(which clusters are entangled, the canonical/localized inversion, the thermal
+trends) are far above this floor.
+
+% ===========================================================================
+\section{Data products, auditing and reproducibility}\label{sec:saved}
+% ===========================================================================
+Every computed object is cached as a self-contained PKL, mirroring the Hubbard
+pipeline:
+\begin{itemize}[nosep]
+  \item \code{mol\_gme\_runs/Benzene/molgme\_v1\_Benzene\_CAS66\_sites-<a-b-c>\_n<n>.pkl}
+        --- per-cluster $T{=}0$ records (canonical); the localized runs carry a
+        \code{\_locpm} tag. Each stores the full metadata (energies, gap, spin,
+        double occupancy), the RDM (real/imaginary parts, spectrum, purity,
+        entropy), all \CGME{} values with bounds, and the GCG decompositions.
+  \item \code{mol\_thermal\_runs/Benzene/molthermal\_v1\_Benzene\_CAS66.pkl}
+        --- the thermal curves $\CGME(T)$ and purities for every cluster.
+  \item PDFs under \code{results/mol\_results/Benzene/}: RDM heatmaps (index
+        order and $S_z$-ordered side by side), per-cluster GME pages, the
+        $T{=}0$ bar chart and the thermal curves.
+\end{itemize}
+An automated audit (\code{main\_mol.py --audit}) checks completeness, the
+lower/upper-bound bracket, RDM validity ($\mathrm{Tr}\rho=1$, hermiticity,
+positivity), coverage, GME incidence and thermal-curve sanity, and exports tidy
+CSV summaries. The present data pass all validity checks; the only
+\textsc{warn} is the numerical floor discussed above.
+
+% ===========================================================================
+\section{Conclusions and next steps}
+% ===========================================================================
+For benzene CAS$(6,6)$ we find that (i) the ground state carries genuine
+multipartite entanglement whose visibility depends strongly on the orbital
+partition; (ii) in the Pipek--Mezey \emph{site-local} basis the $\pi$ system
+reproduces the qualitative GME pattern of the half-filled six-site Hubbard
+ring --- growth with cluster size, symmetry-uniform values, suppressed double
+occupancy --- while in the canonical basis the state is nearly separable and
+entanglement is instead \emph{generated} by thermal mixing; and (iii) all
+reduced states rigorously respect the $S_z$ superselection structure, as
+required.
+
+Next steps: thermal analysis in the localized basis; the $n=6$
+(whole-$\pi$-system) GME in the localized basis, where it is well defined;
+quantitative comparison with the $L=6$ Hubbard ring at matched effective
+coupling (via $\langle D\rangle$); and extension of the identical pipeline to
+the remaining benchmark molecules on the HPC cluster.
+
+\end{document}
