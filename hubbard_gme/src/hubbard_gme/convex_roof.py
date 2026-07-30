@@ -12,25 +12,61 @@ The true definition is the convex roof:
 
 minimised over ALL pure-state decompositions  ρ = Σᵢ pᵢ |ψᵢ⟩⟨ψᵢ|.
 
-This module implements FOUR complementary bounds and methods:
+This module implements several complementary bounds and full convex-roof
+minimisers. Bounds bracket C_GME(ρ); the minimisers estimate it directly by
+optimising Σᵢ pᵢ·m(|ψᵢ⟩) over pure-state decompositions.
+
+BOUNDS
   1. Lower bound (paper)      — Coherence witness I_{x,y}(ρ)
-  2. Lower bound (supervisor) — Optimize over (z1,z2) pairs via eqs.(6-9)
-  3. Upper bound              — Eigendecomposition ρ = Σλᵢ|φᵢ⟩⟨φᵢ|
-  4. Numerical (exact)        — Unitary optimization via scipy
-  5. CVXPY SDP relaxation     — SDP lower bound (when cvxpy available)
+                                  → convex_roof_lower_bound
+  2. Lower bound (supervisor) — Optimise over (z1,z2) pairs via eqs.(6-9)
+                                  → convex_roof_lower_bound_supervisor
+  3. Lower bound (SDP)        — CVXPY SDP relaxation (optional; needs cvxpy)
+                                  → convex_roof_sdp_relaxation
+  4. Upper bound              — Eigendecomposition ρ = Σλᵢ|φᵢ⟩⟨φᵢ|
+                                  → convex_roof_upper_bound
+
+CONVEX-ROOF MINIMISERS (minimise over the decomposition manifold)
+  5. Unitary exp(iH), scipy  — L-BFGS-B / DE over U = exp(iH)
+                                  → convex_roof_numerical   (key: C_expo)
+                                  (legacy Cayley-transform variant:
+                                   unitary_convex_roof,      key: C_cayl)
+  6. Algorithm B — Stiefel   — Euler–Hurwitz angles on St(k,r), scipy
+                                minimisers (L-BFGS-B/Powell/SLSQP/TNC/…),
+                                outer loop over cardinality k
+                                  → convex_roof_stiefel      (key: C_stiefel)
+  7. Algorithm A — GCG       — Generalised Conjugate Gradient on U(k) with
+                                closed-form Riemannian gradient, parallel
+                                transport, modified Polak–Ribière
+                                  → convex_roof_gcg          (key: C_gcg)
+  8. Hybrid — Stiefel + GCG  — Riemannian CG directly on St(k,r) (QR
+                                retraction, minimal 2kr−r² parametrisation)
+                                  → convex_roof_stiefel_gcg  (key: C_stiefel_gcg)
+
+Algorithms A and B follow Rothlisberger, Lehmann & Loss, Phys. Rev. A 80,
+042301 (2009).
+
+MEASURES
+  The minimisers optimise a pluggable pure-state measure selected via the
+  `measure=` argument (see the MEASURES registry / _resolve_measure):
+    "cgme"         — genuine multipartite entanglement C_GME  (default)
+    "meyerwallach" — Meyer–Wallach global entanglement γ
 
 USAGE EXAMPLES
 --------------
-# For mixed states (n < N)
+# For mixed states (n < N) — the unified entry point runs the three manifold
+# solvers (stiefel, gcg, stiefel_gcg) plus the bounds.
 result = full_convex_roof_analysis(rho, sites=(0,1,2), n_restarts=20)
-C_LB = result['C_LB_best']
-C_num = result['C_numerical']
+C_lower = result['C_LB_best']      # best lower bound (paper vs supervisor)
+C_upper = result['C_UB']           # eigendecomposition upper bound
+C_est   = result['C_stiefel']      # convex-roof estimate
+                                   # (also result['C_gcg'], result['C_stiefel_gcg'])
 
 # For pure states (n = N) — use direct C_GME formula
 from .gme import compute_C_GME_pure
 C_exact = compute_C_GME_pure(rho, n)
 
-# All-in-one analysis
+# Backward-compatible alias for full_convex_roof_analysis
 result = convex_roof_analysis_complete(rho, sites, use_cvxpy=True)
 """
 
