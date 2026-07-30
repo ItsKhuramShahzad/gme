@@ -165,7 +165,23 @@ python main.py --t-scan --L 6 --U 10.0 --t-scan-min 0.05 --t-scan-max 2.0 \
 # Task 4 — U-scan: C_GME(n) vs U at T=0 (fixed t)
 python main.py --u-scan --L 6 --t 1.0 --u-scan-min 1.0 --u-scan-max 20.0 \
                --u-scan-steps 20 --min-n 2 --use-pkl-cache
+
+# Task 4b — Extended Hubbard: on-site U + nearest-neighbour V (V Σ_j n_j n_{j+1}).
+#   U-scan at a FIXED V/t (C_GME vs U/t at V/t = 5, 10, 20; run once per V):
+python main.py --u-scan --L 6 --Ne 6 --t 1.0 --u-scan-min 0 --u-scan-max 15 \
+               --u-scan-steps 16 --V 5 --full-hamiltonian --min-n 2 \
+               --use-pkl-cache --output-prefix V5
+
+# Task 4c — V-scan: fix t and U, sweep V — shows the Mott -> CDW transition
+#   at V ~ U/2 (short-range C_GME collapses across the transition):
+python main.py --v-scan --L 6 --Ne 6 --t 1.0 --U 10 --v-scan-min 0 \
+               --v-scan-max 15 --v-scan-steps 16 --full-hamiltonian --min-n 2 \
+               --use-pkl-cache --output-prefix Vscan_U10
 ```
+
+`--V` defaults to 0.0 (plain Hubbard); it is a nearest-neighbour density-density
+term `V Σ_j n_j n_{j+1}` (n_j = n_{j↑} + n_{j↓}, PBC ring). V is saved in every
+scan PKL (in `system_info` and the filename) and shown in the plot title.
 
 `run_all_tasks.sh` runs all four tasks for L=6, U=10, t=1 and writes the PDFs to
 `outputs/`. With `--use-pkl-cache` a second run loads the cached results and

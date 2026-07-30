@@ -1,0 +1,27 @@
+\begin{table}[h]\centering
+\caption{Ground-state ($T=0$) cluster properties for $L=6$, $U=10.0$, $t=0.05$ ($U/t=200$), full Hamiltonian.}
+\begin{tabular}{@{}cccccc@{}}\toprule
+$n$ & $2^n$ & Purity & Entropy (bits) & $C_{\mathrm{GME}}$ & Parity \\
+\midrule
+2 & 4 & 0.5409 & 1.3078 & 0.4342 & even \\
+3 & 8 & 0.4448 & 1.3837 & 0.3515 & odd \\
+4 & 16 & 0.5409 & 1.3080 & 0.5874 & even \\
+5 & 32 & 0.5000 & 1.0007 & 0.7768 & odd \\
+6 & 64 & 1.0000 & -0.0000 & 0.9582 & even \\
+\bottomrule\end{tabular}\end{table}
+
+\begin{table}[h]\centering
+\caption{Ground-state ($T=0$) cluster properties for $L=8$, $U=10.0$, $t=0.05$ ($U/t=200$), full Hamiltonian.}
+\begin{tabular}{@{}cccccc@{}}\toprule
+$n$ & $2^n$ & Purity & Entropy (bits) & $C_{\mathrm{GME}}$ & Parity \\
+\midrule
+2 & 4 & 0.5277 & --- & 0.4127 & even \\
+3 & 8 & 0.4282 & --- & 0.2812 & odd \\
+4 & 16 & 0.4785 & --- & 0.4294 & even \\
+5 & 32 & 0.4282 & --- & 0.4239 & odd \\
+6 & 64 & 0.5277 & --- & 0.6390 & even \\
+7 & 128 & 0.5000 & 1.0000$^{*}$ & 0.7882 & odd \\
+8 & 256 & 1.0000 & 0.0000$^{*}$ & 0.9719 & even \\
+\bottomrule\end{tabular}\end{table}
+
+% * analytic: n=L is the pure whole ring (S=0); n=L-1 is complementary to one site (rho=I/2 -> 1 bit)

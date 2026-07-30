@@ -14,8 +14,10 @@ Layouts:
     --layout grid      (default) all body-orders n shown at once, 2x3 scenes
     --layout dropdown  one large panel + a dropdown to switch n
 
-The n=2 surface shows the Werner measure sqrt(1-sqrt(1-C^2)), matching the
-PDF/heatmap figures. No recomputation — it reads the cached PKL.
+Every panel, n=2 included, shows the convex roof C_GME exactly as stored,
+matching the PDF/heatmap figures. (For n=2 the convex roof equals the Wootters
+concurrence; the Werner form sqrt(1-sqrt(1-C^2)) is NOT a valid GME and is not
+plotted.) No recomputation — it reads the cached PKL.
 
 Usage:
     python render_surface_html.py <tTsurface_*.pkl> [-o out.html] [--layout grid|dropdown]
@@ -28,7 +30,6 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
-from hubbard_gme.thermal_pipeline import _werner_gme_from_concurrence
 
 
 def _load(pkl_path):
@@ -48,13 +49,12 @@ def _load(pkl_path):
 
 
 def _label(n):
-    return f"n={n} (bipartite, Werner)" if n == 2 else f"n={n}"
+    return f"n={n} (bipartite)" if n == 2 else f"n={n}"
 
 
 def _Z(Cs, n):
+    # Stored convex roof, untransformed for every n (n=2 included).
     Z = np.asarray(Cs[n], float)                       # (n_t, n_T)
-    if n == 2:
-        Z = _werner_gme_from_concurrence(Z)
     return Z.T                                         # plotly wants (n_T, n_t)
 
 

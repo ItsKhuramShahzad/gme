@@ -131,6 +131,7 @@ def build_hubbard_hamiltonian(
     t_prime: float = None,
     t2:      float = None,
     t_perp:  float = None,
+    V: float =0.0,
 ) -> FermionOperator:
     """
     Build the Hubbard Hamiltonian for the chosen topology.
@@ -147,6 +148,7 @@ def build_hubbard_hamiltonian(
     t_prime : NNN hopping (nnn mode, default 0.3*t).
     t2      : Weak bond hopping (ssh mode, default 0.5*t).
     t_perp  : Rung hopping (ladder mode, default t).
+    V       : On-site potential (default 0.0).
 
     Returns
     -------
@@ -199,6 +201,14 @@ def build_hubbard_hamiltonian(
         n_dn = FermionOperator(((2*j+1, 1), (2*j+1, 0)))
         H += U * n_up * n_dn
 
+    # ── Nearest-neighbor potential terms ──────────────────────────────────
+    if abs(V) > 1e-14:
+        for j in range(L):
+            k = (j+1) %L
+            n_j= (FermionOperator(((2*j,1), (2*j,0))) + FermionOperator(((2*j+1,1), (2*j+1,0))))
+            n_k= (FermionOperator(((2*k,1),(2*k,0))) + FermionOperator(((2*k+1,1), (2*k+1,0))))
+            H += V * n_j * n_k
+ 
     return H
 
 
@@ -225,13 +235,14 @@ def compute_ground_and_excited_states(
     t2:      float = None,
     t_perp:  float = None,
     spin_preserving: bool = True,
+    V:       float = 0.0,
 ) -> tuple[float, np.ndarray, float, np.ndarray, int]:
     """
     Return ground state and first excited state.
     Returns: E0, psi0, E1, psi1, n_spin_orbitals
     """
     n_so = 2 * L
-    H    = build_hubbard_hamiltonian(L, t, U, mode, t_prime, t2, t_perp)
+    H    = build_hubbard_hamiltonian(L, t, U, mode, t_prime, t2, t_perp, V=V)
     E, vecs, n_so = _diagonalize(H, n_so, n_electrons, k=2, spin_preserving=spin_preserving)
     return E[0], vecs[:, 0], E[1], vecs[:, 1], n_so
 
@@ -247,13 +258,15 @@ def compute_k_eigenstates(
     t2:      float = None,
     t_perp:  float = None,
     spin_preserving: bool = True,
+    V:       float = 0.0,
+    
 ) -> tuple[np.ndarray, np.ndarray, int]:
     """
     Return the k lowest eigenstates.
     Returns: energies (k,), eigvecs (dim, k), n_spin_orbitals
     """
     n_so = 2 * L
-    H    = build_hubbard_hamiltonian(L, t, U, mode, t_prime, t2, t_perp)
+    H    = build_hubbard_hamiltonian(L, t, U, mode, t_prime, t2, t_perp, V=V    )
     return _diagonalize(H, n_so, n_electrons, k, spin_preserving=spin_preserving)
 
 
@@ -269,6 +282,7 @@ def compute_state_at_index(
     t2:      float = None,
     t_perp:  float = None,
     spin_preserving: bool = True,
+    V:       float = 0.0,
 ) -> tuple[float, np.ndarray, float, np.ndarray, np.ndarray, np.ndarray, int]:
     """
     Compute a specific eigenstate by 0-indexed position.
@@ -303,7 +317,7 @@ def compute_state_at_index(
     k = max(state_idx + 2, k_min)
     energies, eigvecs, n_so = compute_k_eigenstates(
         L=L, t=t, U=U, mode=mode, n_electrons=n_electrons,
-        k=k, t_prime=t_prime, t2=t2, t_perp=t_perp,
+        k=k, t_prime=t_prime, t2=t2, t_perp=t_perp, V=V,
         spin_preserving=spin_preserving,
     )
 
@@ -401,6 +415,8 @@ def compute_all_eigenstates(
     t2:      float = None,
     t_perp:  float = None,
     spin_preserving: bool = True,
+    V:       float = 0.0,
+
 ) -> tuple[np.ndarray, np.ndarray, int]:
     """
     Full dense diagonalization — returns ALL eigenstates.
@@ -418,7 +434,7 @@ def compute_all_eigenstates(
     n_spin_orbitals : 2 * L
     """
     n_so = 2 * L
-    H    = build_hubbard_hamiltonian(L, t, U, mode, t_prime, t2, t_perp)
+    H    = build_hubbard_hamiltonian(L, t, U, mode, t_prime, t2, t_perp, V=V)
     H_sp = get_number_preserving_sparse_operator(
         H, n_so, n_electrons, spin_preserving=spin_preserving
     )

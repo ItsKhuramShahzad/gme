@@ -25,6 +25,7 @@ from collections import defaultdict
 from openfermion import FermionOperator
 from openfermion.linalg import get_number_preserving_sparse_operator
 import os
+import sys
 import pickle
 import hashlib
 import platform
@@ -590,10 +591,18 @@ def _array_sha256(arr: Optional[np.ndarray]) -> Optional[str]:
 
 
 def _basic_env_meta() -> Dict[str, Any]:
+    # Included as meta["environment"] in EVERY pkl save path across the package
+    # (thermal, u/t/v-scan, tT-surface, standalone single-point, molecular),
+    # so recording the invoking command here stores it in each pkl at exactly
+    # one place. "command" is the reproducible CLI string; "argv" keeps the raw
+    # tokens; "cwd" pins where it was run from.
     return {
         "python_version": platform.python_version(),
         "numpy_version": np.__version__,
         "platform": platform.platform(),
+        "command": " ".join(sys.argv),
+        "argv": list(sys.argv),
+        "cwd": os.getcwd(),
     }
 
 

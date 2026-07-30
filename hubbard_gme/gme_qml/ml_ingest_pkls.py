@@ -53,7 +53,7 @@ import os
 import pickle
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -66,6 +66,20 @@ _SRC_DIR = os.path.join(_REPO_ROOT, "src")                  # <repo>/src
 for _p in (_SRC_DIR, _THIS_DIR):
     if _p not in sys.path:
         sys.path.insert(0, _p)
+
+
+def _anchor(p, base) -> "Path":
+    """Resolve ``p``, anchoring a RELATIVE path to ``base`` (the repo) rather
+    than to the current working directory.
+
+    Every dataset therefore lands in its reserved location no matter where the
+    command is launched from: ``--outdir gme_qml/data_for_ML_v2`` means the same
+    directory whether you run from the repo root, from ``gme_qml/``, or from a
+    SLURM scratch dir. Absolute paths are honoured unchanged.
+    """
+    from pathlib import Path as _Path
+    q = _Path(p).expanduser()
+    return (q if q.is_absolute() else _Path(base) / q).resolve()
 
 from hubbard_gme.metrics import compute_entropy, compute_purity
 from ml_generate_ml_dataset import record_filename, config_hash
@@ -81,19 +95,23 @@ from hubbard_gme.thermal_pipeline import (
 )
 
 
-def _n2_werner_labels(rho: np.ndarray) -> Dict[str, Any]:
+def _n2_wootters_labels(rho: np.ndarray) -> Dict[str, Any]:
     """
-    n=2 label WITHOUT the convex roof: the analytic Werner-state GME
-    sqrt(1 - sqrt(1 - C^2)) (C = Wootters concurrence). Both are stored;
-    C_target is the Werner GME, NOT the bare concurrence.
+    n=2 label WITHOUT running the convex roof numerically.
+
+    For two qubits the Wootters concurrence IS the convex roof exactly
+    (Wootters 1998), so it is used directly as C_target — this is the correct
+    GME for n=2 and matches what GCG converges to (verified to ~1e-15).
+
+    The Werner form sqrt(1 - sqrt(1 - C^2)) is NOT a valid n=2 GME and is
+    deliberately not used as a label.
     """
     c_wootters = float(_wootters_concurrence(rho))
-    c_werner = float(_cgme_analytical_n2(rho))
     return {
-        "C_target": c_werner, "C_gcg": float("nan"),
+        "C_target": c_wootters, "C_gcg": c_wootters,
         "C_pure": float("nan"), "lower_bound_super": float("nan"),
         "C_UB": float("nan"), "C_wootters": c_wootters, "status": "",
-        "source": "werner_analytic", "solver": "werner_analytic",
+        "source": "wootters_analytic", "solver": "wootters_analytic",
     }
 
 PURE_THRESHOLD = 1.0 - 1e-6
@@ -350,9 +368,10 @@ def ingest_surface(results_root: Path, records_dir: Path, outdir: Path,
                     if gamma is None:
                         continue
                     if int(n) == 2:
-                        # n=2 bipartite: analytic Werner GME, not the stored
-                        # convex-roof surface value.
-                        labels = _n2_werner_labels(gamma)
+                        # n=2 bipartite: the Wootters concurrence IS the convex
+                        # roof exactly, so take it analytically from rho rather
+                        # than reading the numerically-solved surface value.
+                        labels = _n2_wootters_labels(gamma)
                     else:
                         C = float(np.asarray(C_surface[n])[ti, Ti])
                         labels = {       # surface thermal path is GCG-only
@@ -402,7 +421,9 @@ def _append_manifest(rows: List[Dict[str, Any]], manifest: Path) -> None:
 def ingest_banks(results_root: Path, records_dir: Path, outdir: Path, done: set,
                  *, T_list: List[float], cutoff: Optional[float],
                  n_restarts: int, max_iter: int, tol: float, k_max_extra: int,
-                 verbose: bool = True) -> List[Dict[str, Any]]:
+                 verbose: bool = True,
+                 only_banks: Optional[Iterable[str]] = None,
+                 ) -> List[Dict[str, Any]]:
     """
     Generate labeled GCG records DIRECTLY from cached RDM banks.
 
@@ -411,11 +432,23 @@ def ingest_banks(results_root: Path, records_dir: Path, outdir: Path, done: set,
     (T=0 → ground state; T>0 → Boltzmann-mixed), run the GCG convex roof, and
     emit a record. This is how banks become ML data — the bank supplies ρ
     (cheap, no diagonalization), GCG supplies the C_GME label.
+
+    only_banks
+        Optional iterable of bank PKL paths. When given, ONLY those banks are
+        labelled instead of every bank on disk — this is what lets
+        ``main.py --build-bank --bank-label`` label exactly the grid it just
+        built rather than the whole cache.
     """
     rows: List[Dict[str, Any]] = []
-    files = sorted(glob.glob(str(results_root / "rdm_bank" / "*.pkl")))
+    if only_banks is not None:
+        want = {os.path.realpath(str(b)) for b in only_banks}
+        files = sorted(p for p in glob.glob(str(results_root / "rdm_bank" / "*.pkl"))
+                       if os.path.realpath(p) in want)
+    else:
+        files = sorted(glob.glob(str(results_root / "rdm_bank" / "*.pkl")))
     if verbose:
-        print(f"[banks] {len(files)} bank files; T grid = {list(T_list)}")
+        scope = "selected" if only_banks is not None else "all"
+        print(f"[banks] {len(files)} bank files ({scope}); T grid = {list(T_list)}")
     for p in files:
         payload = _load_thermal_rdm_bank_pkl(Path(p))
         if payload is None:
@@ -451,9 +484,10 @@ def ingest_banks(results_root: Path, records_dir: Path, outdir: Path, done: set,
                     continue
                 detail = None
                 if int(n) == 2:
-                    # n=2 is bipartite: use the exact analytic Werner GME,
-                    # never the convex roof.
-                    labels = _n2_werner_labels(rho)
+                    # n=2 is bipartite: the Wootters concurrence IS the convex
+                    # roof exactly (Wootters 1998), so label it analytically
+                    # instead of running GCG.
+                    labels = _n2_wootters_labels(rho)
                 else:
                     C, _pur, detail = _gme_lower_bound(
                         rho, int(n), solver="gcg", n_restarts=n_restarts,
@@ -504,8 +538,11 @@ def main():
     ap.add_argument("--k-max-extra", type=int, default=4, help="GCG extra ranks")
     args = ap.parse_args()
 
-    results_root = Path(args.results_root).resolve()
-    outdir = Path(args.outdir).resolve() / "ingested"
+    # Relative paths are anchored to the repo, never to the CWD, so records can
+    # never be scattered outside their reserved location by launching from a
+    # different directory.
+    results_root = _anchor(args.results_root, _REPO_ROOT)
+    outdir = _anchor(args.outdir, _REPO_ROOT) / "ingested"
     records_dir = outdir / "records"
     records_dir.mkdir(parents=True, exist_ok=True)
     manifest = outdir / "manifest.csv"

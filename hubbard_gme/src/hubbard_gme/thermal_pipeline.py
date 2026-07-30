@@ -66,13 +66,17 @@ from .rdm import (
 )
 from .gme import supervisor_gme_lower_bound, compute_C_GME_pure
 from .convex_roof import convex_roof_gcg
-from .metrics import compute_purity
+from .metrics import compute_purity, compute_entropy
 
 
 # ── Color palette for n=2..6 ─────────────────────────────────────────────────
 
-_COLORS = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
-_MARKERS = ['o', 's', '^', 'D', 'v']
+# 8 distinct colours/markers: a run covers body orders n = 2 … L, so with L = 8
+# a 5-entry palette wrapped around and gave n=2/n=7 and n=3/n=8 identical
+# colour+marker pairs (ambiguous legend). Keep >= 8 entries.
+_COLORS = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728',
+           '#9467bd', '#8c564b', '#e377c2', '#17becf']
+_MARKERS = ['o', 's', '^', 'D', 'v', 'P', 'X', '*']
 
 
 # ── Central PKL cache for thermal runs ───────────────────────────────────────
@@ -292,23 +296,26 @@ def _rdm_bank_cache_path(
     cache_version: str,
     spin_preserving: bool = True,
     n_max: Optional[int] = None,
+    V: float = 0.0,
 ) -> Path:
     """
     Deterministic path for the generic RDM bank (energies + averaged Γ^(n)).
 
-    Keyed only by the Hamiltonian (L, Ne, U, t, mode, hoppings), n_min, the
+    Keyed only by the Hamiltonian (L, Ne, U, t, V, mode, hoppings), n_min, the
     Sz sector, and the cluster-averaging convention — deliberately NOT by
     temperature, solver, or analysis type, so every task shares one file.
     A capped bank (n_max < L) gets an ``_nmax{N}`` tag so it never collides
     with (or is mistaken for) the full n_min..L bank; the uncapped filename is
-    unchanged for backward compatibility.
+    unchanged for backward compatibility. The nearest-neighbour V is tagged
+    only when non-zero, so existing V=0 bank filenames stay valid.
     """
     nmax_tag = "" if (n_max is None or n_max >= L) else f"_nmax{int(n_max)}"
+    v_tag = ("_V" + _safe_float_tag(float(V))) if abs(V) > 1e-12 else ""
     filename = (
         f"rdmbank_{cache_version}_"
         f"L{L}_Ne{n_electrons}_U{_safe_float_tag(U)}_t{_safe_float_tag(t)}_"
         f"mode-{mode}_tp{_optional_float_tag(t_prime)}_"
-        f"t2{_optional_float_tag(t2)}_tperp{_optional_float_tag(t_perp)}_"
+        f"t2{_optional_float_tag(t2)}_tperp{_optional_float_tag(t_perp)}{v_tag}_"
         f"nmin{n_min}{nmax_tag}_{_sector_tag(spin_preserving)}_"
         f"clusteravg{int(bool(average_site_clusters))}.pkl"
     )
@@ -567,6 +574,7 @@ def build_or_load_rdm_bank(
     L: int,
     t: float,
     U: float,
+    V: float = 0.0,
     mode: str = "uniform",
     n_electrons: Optional[int] = None,
     n_min: int = 2,
@@ -602,7 +610,7 @@ def build_or_load_rdm_bank(
     n_values = list(range(n_min, n_hi + 1))
 
     cache_path = _rdm_bank_cache_path(
-        L=L, t=t, U=U, t_prime=t_prime, t2=t2, t_perp=t_perp,
+        L=L, t=t, U=U, V=V, t_prime=t_prime, t2=t2, t_perp=t_perp,
         mode=mode, n_electrons=n_electrons, n_min=n_min,
         average_site_clusters=average_site_clusters,
         cache_version=cache_version, spin_preserving=spin_preserving,
@@ -625,7 +633,7 @@ def build_or_load_rdm_bank(
 
     energies, eigvecs, n_so = compute_all_eigenstates(
         L, t, U, mode, n_electrons, t_prime=t_prime, t2=t2, t_perp=t_perp,
-        spin_preserving=spin_preserving,
+        spin_preserving=spin_preserving,V=V
     )
     bank = _build_rdm_bank(
         n_values, eigvecs, n_so, n_electrons,
@@ -638,7 +646,7 @@ def build_or_load_rdm_bank(
             "object_type": "hubbard_rdm_bank",
             "saved_at": datetime.now().isoformat(timespec="seconds"),
             "cache_version": cache_version,
-            "L": int(L), "t": float(t), "U": float(U), "mode": str(mode),
+            "L": int(L), "t": float(t), "U": float(U), "V": float(V), "mode": str(mode),
             "t_prime": None if t_prime is None else float(t_prime),
             "t2": None if t2 is None else float(t2),
             "t_perp": None if t_perp is None else float(t_perp),
@@ -935,19 +943,20 @@ def _converged_thermal_cutoff(
 
 def _make_figure_T(
     T_values: np.ndarray,
-    C_LB: dict,
+    C_GME: dict,
     purity_dict: dict,
     n_values: list,
     system_info: dict,
     solver: str = "gcg",
     spin_preserving: bool = True,
+    T_view_max: Optional[float] = None, # clip the x-axis to this value if provided
 ) -> plt.Figure:
     """
     Two-panel figure: C_GME vs T (top), purity vs T (bottom).
     X-axis is clipped to T_display_max = max T where any C_GME > 0.01,
     so flat-zero tails don't dominate the plot.
     """
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 8), sharex=True)
+    fig, ax1 = plt.subplots(1, 1, figsize=(9, 6))
 
     L, t, U = system_info["L"], system_info["t"], system_info["U"]
     gap = system_info.get("gap", None)
@@ -958,7 +967,7 @@ def _make_figure_T(
 
     # Compute display x-limit: last T where any n has C_GME > 1% of max.
     T_arr = np.asarray(T_values)
-    all_c = np.array([np.asarray(C_LB[n]) for n in n_values])
+    all_c = np.array([np.asarray(C_GME[n]) for n in n_values])
     c_max = float(all_c.max()) if all_c.size > 0 else 1.0
     threshold = max(0.01 * c_max, 1e-4)
     active_mask = np.any(all_c > threshold, axis=0)
@@ -968,11 +977,18 @@ def _make_figure_T(
     else:
         T_display_max = float(T_arr[-1])
 
+    # Per-n colour + marker match the t/U/V scan plots (plot_scan_finalized)
+    # so a curve for a given n looks identical across every figure type.
     for i, n in enumerate(n_values):
-        lbl = f"n={n}" + (" (bipartite)" if n == 2 else "")
-        ax1.plot(T_arr, C_LB[n],
+        lbl = f"n={n}"
+        if n == 2:
+            lbl += " (bipartite)"
+        elif n == n_values[-1]:
+            lbl += " (whole ring)"
+        ax1.plot(T_arr, C_GME[n],
                  color=_COLORS[i % len(_COLORS)],
-                 label=lbl, lw=2)
+                 marker=_MARKERS[i % len(_MARKERS)], ms=5,
+                 label=lbl, lw=1.6)
 
     if C_exact is not None:
         ax1.axhline(
@@ -991,21 +1007,11 @@ def _make_figure_T(
         f"T ∈ [{float(T_arr[0]):.3g}, {float(T_arr[-1]):.3g}]  ({len(T_arr)} points)",
         fontsize=11,
     )
-    ax1.legend(fontsize=9, loc="upper right")
+    ax1.set_xlabel("Temperature $T$ (K)", fontsize=12)
+    ax1.legend(fontsize=9, ncol=2, loc="upper right", framealpha=0.95)
     ax1.set_ylim(bottom=0)
-    ax1.set_xlim(left=float(T_arr[0]), right=T_display_max)
+    ax1.set_xlim(left=float(T_arr[0]), right=T_display_max if T_view_max is None else float(T_view_max))
     ax1.grid(True, alpha=0.3)
-
-    for i, n in enumerate(n_values):
-        ax2.plot(T_arr, purity_dict[n],
-                 color=_COLORS[i % len(_COLORS)],
-                 label=f"n={n}", lw=2)
-
-    ax2.set_ylabel(r"Purity $\mathrm{Tr}(\rho^2)$", fontsize=12)
-    ax2.set_xlabel("Temperature $T$ (K)", fontsize=12)
-    ax2.set_ylim(0, 1.05)
-    ax2.legend(fontsize=9, loc="upper right")
-    ax2.grid(True, alpha=0.3)
 
     plt.tight_layout()
     return fig
@@ -1014,7 +1020,7 @@ def _make_figure_T(
 def _make_figure_t(
     t_values: np.ndarray,
     U: float,
-    C_LB: dict,
+    C_GME: dict,
     n_values: list,
     L: int,
     mode: str,
@@ -1028,7 +1034,7 @@ def _make_figure_t(
 
     for i, n in enumerate(n_values):
         lbl = f"n={n}" + (" (bipartite)" if n == 2 else "")
-        ax.plot(tu, C_LB[n],
+        ax.plot(tu, C_GME[n],
                 color=_COLORS[i % len(_COLORS)],
                 marker=_MARKERS[i % len(_MARKERS)],
                 ms=4, label=lbl, lw=2)
@@ -1276,7 +1282,8 @@ def run_thermal_gme_analysis(
     save_pkl: bool = True,
     n_workers: int = 1,
     average_site_clusters: bool = True,
-    spin_preserving: bool = True,
+    spin_preserving: bool = True,\
+        T_view_max: Optional[float] = None
 ) -> dict:
     """
     Compute C_GME(n, T) for n = n_min..L as a function of temperature T.
@@ -1390,6 +1397,7 @@ def run_thermal_gme_analysis(
             result["system_info"],
             solver=result.get("solver", solver),
             spin_preserving=spin_preserving,
+            T_view_max=T_view_max
         )
         fig.savefig(plot_path, dpi=150, bbox_inches="tight")
         plt.close(fig)
@@ -1633,7 +1641,7 @@ def run_thermal_gme_analysis(
     sinfo = dict(L=L, t=t, U=U, mode=mode, Ne=n_electrons,
                  gap=gap, C_exact_gs=C_exact_gs)
     fig = _make_figure_T(T_values, C_GME, purity_dict, n_values, sinfo,
-                         solver=solver, spin_preserving=spin_preserving)
+                         solver=solver, spin_preserving=spin_preserving, T_view_max=T_view_max)
     fig.savefig(plot_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"\n    Plot → {plot_path}")
@@ -1720,9 +1728,11 @@ def find_first_excited_singlet(
     L: int,
     t: float,
     U: float,
+    V: float,
     mode: str = "uniform",
     n_electrons: Optional[int] = None,
     k: int = 12,
+    spin_preserving: bool = True,
 ) -> dict:
     """
     Find the first S=0 excited state (first singlet above the triplet manifold).
@@ -1730,6 +1740,11 @@ def find_first_excited_singlet(
     Parameters
     ----------
     k : number of eigenstates to compute (increase if singlet not found)
+    spin_preserving :
+        Which space to diagonalise in — True = S_z=0 sector (default, the
+        historical behaviour), False = full Hamiltonian. This MUST match the
+        space the caller builds its RDM operators in, otherwise the returned
+        eigenvector lives in a different (smaller) Hilbert space.
 
     Returns
     -------
@@ -1746,11 +1761,15 @@ def find_first_excited_singlet(
         n_electrons = L
 
     energies, eigvecs, n_so = compute_k_eigenstates(
-        L=L, t=t, U=U, mode=mode, n_electrons=n_electrons, k=k
+        L=L, t=t, U=U, mode=mode, n_electrons=n_electrons, k=k,
+        spin_preserving=spin_preserving, V=V,
     )
     spin_table = classify_eigenstates_spin(
         eigvecs=eigvecs, energies=energies,
         L=L, n_electrons=n_electrons, n_spin_orbitals=n_so,
+        # the S^2 operator must be built in the SAME space the eigenvectors
+        # live in, otherwise <psi|S^2|psi> is a dimension mismatch
+        spin_preserving=spin_preserving,
     )
 
     print("\n  Eigenstate spin classification:")
@@ -1815,6 +1834,8 @@ def run_excited_singlet_gme(
     save_pkl: bool = True,
     n_workers: int = 1,
     spin_preserving: bool = True,
+    V: float = 0.0,  # optional nearest-neighbour interaction
+    T_view_max: Optional[float] = None,
 ) -> dict:
     """
     GME analysis of the first singlet excited state.
@@ -1918,7 +1939,7 @@ def run_excited_singlet_gme(
             return result
 
     # Find the first excited singlet
-    singlet_info = find_first_excited_singlet(L, t, U, mode, n_electrons, k=k)
+    singlet_info = find_first_excited_singlet(L, t, U,V, mode, n_electrons, k=k)
     singlet_idx = singlet_info["idx"]
     psi_singlet = singlet_info["psi"]
     E_singlet   = singlet_info["energy"]
@@ -2044,7 +2065,7 @@ def run_excited_singlet_gme(
         sinfo = dict(L=L, t=t, U=U, mode=mode, Ne=n_electrons,
                      gap=None, C_exact_gs=C_exact_singlet,
                      label_suffix=f" — 1st excited singlet (idx={singlet_idx})")
-        fig = _make_figure_T(T_values, C_GME_T, purity_T, n_values, sinfo, solver=solver)
+        fig = _make_figure_T(T_values, C_GME_T, purity_T, n_values, sinfo, solver=solver, spin_preserving=spin_preserving, T_view_max=T_view_max)
         fig.savefig(plot_path_T, dpi=150, bbox_inches="tight")
         plt.close(fig)
         print(f"\n    Plot → {plot_path_T}")
@@ -2117,13 +2138,20 @@ def _tscan_cache_path(
     t_values: np.ndarray,
     cache_version: str,
     spin_preserving: bool = True,
+    excited_singlet: bool = False,
+    V: float = 0.0,
 ) -> Path:
     """Deterministic PKL path for one t-scan run."""
     t_arr = np.asarray(t_values, dtype=float)
     filename = (
         f"tscan_{cache_version}_"
         f"L{L}_Ne{n_electrons}_U{_safe_float_tag(U)}_"
-        f"mode-{mode}_nmin{n_min}_solver-{solver}_{_sector_tag(spin_preserving)}_"
+        f"mode-{mode}_nmin{n_min}_solver-{solver}_"
+        f"{_sector_tag(spin_preserving)}"
+        # tags added ONLY when set, so existing ground-state / V=0 PKLs keep
+        # their names and stay cache-reusable
+        f"{'_es' if excited_singlet else ''}"
+        f"{('_V' + _safe_float_tag(float(V))) if abs(V) > 1e-12 else ''}_"
         f"restarts{int(n_restarts)}_iter{int(max_iter)}_"
         f"kmax{int(k_max_extra)}_tol{_safe_float_tag(float(tol))}_"
         f"{_grid_tag(t_arr, 't')}-{_array_digest(t_arr)}.pkl"
@@ -2131,10 +2159,109 @@ def _tscan_cache_path(
     return _thermal_runs_dir() / filename
 
 
+def plot_scan_finalized(result: dict, plot_path: str,
+                        spin_preserving: bool = True,
+                        save_png: bool = False) -> str:
+    """
+    Draw the FINALIZED (replot-style) scan figure directly from a result dict
+    and save it to ``plot_path``. Handles both t-scans (key ``t_values``) and
+    U-scans (key ``U_values``). This is the single source of truth for scan
+    figures, used by run_t_dependence_gme / run_U_dependence_gme and by the
+    standalone replot script, so every scan automatically produces the same
+    finalized style (8-colour palette, n=L labelled pure, Wootters reference
+    for n=2). Returns ``plot_path``.
+    """
+    si = result.get("system_info", {}) or {}
+    L = int(si.get("L", 0))
+    mode = si.get("mode", "uniform")
+    C = result["C_GME"]
+    ns = sorted(C)
+    is_t = "t_values" in result
+    is_v = "V_values" in result
+    V = float(si.get("V", 0.0))
+
+    if is_v:                                     # V-scan: fix U & t, sweep V
+        t = float(si.get("t", 1.0)); U = float(si.get("U", 0.0))
+        x = (np.asarray(result["V_over_t"], float) if "V_over_t" in result
+             else np.asarray(result["V_values"], float) / t)
+        xlabel, fixed, xkind = r"$V/t$", f"U={U}, t={t}", "V"
+    elif is_t:                                   # t-scan: fix U, sweep t
+        U = float(si.get("U", 1.0))
+        x = np.asarray(result["t_values"], float) / U
+        xlabel, fixed, xkind = r"$t/U$", f"U={U}", "t"
+    else:                                        # U-scan: fix t, sweep U
+        t = float(si.get("t", 1.0))
+        x = (np.asarray(result["U_over_t"], float) if "U_over_t" in result
+             else np.asarray(result["U_values"], float) / t)
+        xlabel, fixed, xkind = r"$U/t$", f"t={t}", "U"
+
+    # show a fixed V in the title on t-/U-scans (V is the axis on a V-scan, so
+    # it is not repeated there); only when V != 0 so V=0 plots are unchanged
+    v_tag = "" if is_v else (f", V={V:g}" if abs(V) > 1e-12 else "")
+
+    sector = ("full Hamiltonian (all $S_z$)" if not spin_preserving
+              else "$S_z$=0 sector")
+
+    fig, ax = plt.subplots(figsize=(9, 6))
+    for k, n in enumerate(ns):
+        lab = f"n={n}"
+        if n == 2:
+            lab += " (bipartite)"
+        elif n == L:
+            lab += " (whole ring, pure)"
+        ax.plot(x, np.asarray(C[n], float),
+                color=_COLORS[k % len(_COLORS)],
+                marker=_MARKERS[k % len(_MARKERS)], ms=5, lw=1.6, label=lab)
+
+    ex = result.get("C_exact_nL")
+    if ex is not None and np.isfinite(np.asarray(ex, float)).any():
+        ax.plot(x, np.asarray(ex, float), color="k", ls="--", lw=1.4,
+                label=f"Exact $C_{{GME}}$(n={max(ns)})")
+
+    # n=2 analytic reference: the Wootters concurrence, which for two qubits IS
+    # the convex roof exactly. If an older PKL does not store it, fall back to
+    # the n=2 C_GME curve (identical by construction).
+    # NOTE: the Werner form sqrt(1-sqrt(1-C^2)) is NOT a valid GME for n=2 and
+    # is deliberately not plotted — only the convex roof / Wootters is correct.
+    if 2 in C:
+        w = result.get("C_wootters_n2")
+        w = (np.asarray(w, float) if w is not None
+             and np.isfinite(np.asarray(w, float)).any()
+             else np.asarray(C[2], float))
+        ax.plot(x, w, color="k", ls=":", lw=2.2,
+                label=r"n=2 Wootters $C$  (= n=2 convex roof)")
+
+    ax.set_xlabel(xlabel, fontsize=13)
+    ax.set_ylabel(r"$C_{GME}$  (T=0)", fontsize=13)
+    # say WHICH state the curves describe — a ground-state and an
+    # excited-singlet figure are otherwise indistinguishable
+    _state = ("1st excited singlet" if result.get("excited_singlet")
+              else "ground state")
+    ax.set_title(f"{xkind}-dependence of GME: L={L}, {fixed}, mode={mode}{v_tag}, "
+                 f"T=0, {_state}  [{sector}]\n"
+                 f"{xlabel.strip('$')} $\\in$ [{x.min():.3f}, {x.max():.3f}]  "
+                 f"({len(x)} points)", fontsize=11)
+    ax.grid(alpha=0.3)
+    # C_GME lives in [0, 1], but curves sitting exactly ON a bound (n=2 at 0 for
+    # excited states, n=L at 1 for a pure whole-ring state) get their markers
+    # clipped in half by the axes frame — pad so every curve is fully visible.
+    ax.set_ylim(-0.03, 1.05)
+    ax.legend(fontsize=9, ncol=2, loc="best", framealpha=0.95)
+    fig.tight_layout()
+    os.makedirs(os.path.dirname(plot_path) or ".", exist_ok=True)
+    fig.savefig(plot_path, dpi=200, bbox_inches="tight")
+    if save_png:
+        fig.savefig(os.path.splitext(plot_path)[0] + ".png", dpi=140,
+                    bbox_inches="tight")
+    plt.close(fig)
+    return plot_path
+
+
 def run_t_dependence_gme(
     L: int,
     t_values: np.ndarray,
     U: float,
+    V: float = 0.0,
     mode: str = "uniform",
     n_electrons: Optional[int] = None,
     n_min: int = 2,
@@ -2151,6 +2278,8 @@ def run_t_dependence_gme(
     cache_version: str = "v1",
     force_recompute: bool = False,
     spin_preserving: bool = True,
+    excited_singlet: bool = False,
+    singlet_k: int = 12,
 ) -> dict:
     """
     Compute C_GME(n) at T = 0 for each value of t (fixing U).
@@ -2189,6 +2318,8 @@ def run_t_dependence_gme(
         max_iter=max_iter, tol=tol, k_max_extra=k_max_extra,
         t_values=t_values, cache_version=cache_version,
         spin_preserving=spin_preserving,
+        excited_singlet=excited_singlet,
+        V=V,
     )
 
     if use_pkl_cache and not force_recompute and cache_path.exists():
@@ -2201,25 +2332,7 @@ def run_t_dependence_gme(
         plot_path = os.path.join(
             output_dir, f"{prefix}task3_tscan_GME_L{L}_U{U}_{_sector_tag(spin_preserving)}_{_grid_tag(np.asarray(result['t_values']), 't')}_{ts}.pdf"
         )
-        t_vals = np.asarray(result["t_values"])
-        n_vals = result["n_values"]
-        n_max_r = max(n_vals)
-        n_min_r = min(n_vals)
-        fig = _make_figure_t(
-            t_vals, U, result["C_GME"], n_vals, L, mode,
-            solver=result.get("solver", solver),
-            spin_preserving=spin_preserving,
-        )
-        ax = fig.axes[0]
-        ax.plot(
-            t_vals / U, result["C_exact_nL"],
-            color=_COLORS[(n_max_r - n_min_r) % len(_COLORS)],
-            ls="--", lw=1.5,
-            label=f"Exact C_GME(n={n_max_r})",
-        )
-        ax.legend(fontsize=10)
-        fig.savefig(plot_path, dpi=150, bbox_inches="tight")
-        plt.close(fig)
+        plot_scan_finalized(result, plot_path, spin_preserving=spin_preserving)
         result["plot_path"] = plot_path
         print(f"\n[cache] loaded t-scan PKL → {cache_path}")
         print(f"[cache] regenerated plot → {plot_path}")
@@ -2235,6 +2348,13 @@ def run_t_dependence_gme(
 
     C_GME: dict[int, np.ndarray] = {n: np.zeros(len(t_values)) for n in n_values}
     purity_dict: dict[int, np.ndarray] = {n: np.zeros(len(t_values)) for n in n_values}
+    entropy_dict: dict[int, np.ndarray] = {n: np.zeros(len(t_values)) for n in n_values}
+    rank_dict: dict[int, np.ndarray] = {n: np.zeros(len(t_values), dtype=int) for n in n_values}
+    convergence: dict[int, list] = {n: [None] * len(t_values) for n in n_values}
+    # which eigenstate was actually used at each grid point (excited-singlet mode);
+    # its index moves with the parameter through level crossings, so it is recorded
+    singlet_idx: np.ndarray = np.full(len(t_values), -1, dtype=int)
+    singlet_energy: np.ndarray = np.full(len(t_values), np.nan)
     C_exact: np.ndarray = np.zeros(len(t_values))
     C_analytical_n2: np.ndarray = np.zeros(len(t_values))
     C_wootters_n2:   np.ndarray = np.zeros(len(t_values))
@@ -2245,21 +2365,43 @@ def run_t_dependence_gme(
             print(f"\n  t={t:.4g} (t/U={t/U:.4f}) …", flush=True)
 
         energies, eigvecs, n_so = compute_all_eigenstates(
-            L, t, U, mode, n_electrons, spin_preserving=spin_preserving,
+            L, t, U, mode, n_electrons, spin_preserving=spin_preserving,V=V,
         )
-        E0 = energies[0]
-        psi0 = eigvecs[:, 0]
+        if excited_singlet:
+            # Same spin-resolved search as the U-scan: the singlet's index
+            # moves with t through level crossings, so re-locate it per point.
+            info = find_first_excited_singlet(
+                L=L, t=float(t), U=U, V=V, mode=mode,
+                n_electrons=n_electrons, k=singlet_k,
+                spin_preserving=spin_preserving,   # must match the RDM ops
+            )
+            E0 = float(info["energy"])
+            psi0 = np.asarray(info["psi"])
+            singlet_idx[i] = int(info["idx"])
+            singlet_energy[i] = E0
+            if verbose:
+                print(f"    first excited singlet: idx={info['idx']}  "
+                      f"E={E0:.8f}", flush=True)
+        else:
+            E0 = energies[0]
+            psi0 = eigvecs[:, 0]
 
         degen = np.where(np.abs(energies - E0) < 1e-10)[0]
         if len(degen) > 1 and verbose:
-            print(f"    [WARN] {len(degen)}-fold degenerate ground state")
+            _lbl = "excited singlet" if excited_singlet else "ground state"
+            print(f"    [WARN] {len(degen)}-fold degenerate {_lbl}")
 
         for n in n_values:
             sites = tuple(range(n))
             ops = _precompute_ops(sites, n_so, n_electrons,
                                   spin_preserving=spin_preserving)
 
-            if len(degen) == 1:
+            if len(degen) <= 1:
+                # <=1: non-degenerate state — use psi0 directly. This also
+                # guards the excited-singlet path where E0 comes from a
+                # separate diagonalisation: if it fails to match any entry in
+                # `energies` (degen empty), fall back to psi0 instead of
+                # dividing a zero matrix by 0 (which produced silent NaNs).
                 rho_raw = _rdm_from_ops(ops, psi0, n)
             else:
                 dim = 2 ** n
@@ -2278,6 +2420,10 @@ def run_t_dependence_gme(
             )
             C_GME[n][i] = c_val
             purity_dict[n][i] = pur
+            # entropy + rank stored alongside purity so the PKL is self-contained
+            entropy_dict[n][i] = float(compute_entropy(rho))
+            rank_dict[n][i] = int(np.sum(np.real(np.linalg.eigvalsh(rho)) > 1e-10))
+            convergence[n][i] = _detail    # full solver detail (standard format)
 
             if n == n_max:
                 C_exact[i] = float(compute_C_GME_pure(rho, n_max))
@@ -2293,29 +2439,11 @@ def run_t_dependence_gme(
             if 2 in n_values:
                 print(f"    C_analytical(n=2)={C_analytical_n2[i]:.4f}")
 
-    # Plot
     os.makedirs(output_dir, exist_ok=True)
     prefix = f"{output_prefix}_" if output_prefix else ""
     plot_path = os.path.join(
         output_dir, f"{prefix}task3_tscan_GME_L{L}_U{U}_{_sector_tag(spin_preserving)}_{_grid_tag(t_values, 't')}_{ts}.pdf"
     )
-    fig = _make_figure_t(t_values, U, C_GME, n_values, L, mode,
-                         solver=solver, spin_preserving=spin_preserving)
-
-    ax = fig.axes[0]
-    ax.plot(t_values / U, C_exact, color=_COLORS[(n_max - n_min) % len(_COLORS)],
-            ls="--", lw=1.5, label=f"Exact C_GME(n={n_max})")
-    if 2 in n_values:
-        ax.plot(t_values / U, C_wootters_n2,
-                color=_COLORS[0], ls="--", lw=1.5,
-                label=r"n=2 Wootters: $C$")
-        ax.plot(t_values / U, C_analytical_n2,
-                color=_COLORS[0], ls=":", lw=2.0,
-                label=r"n=2 Werner: $\sqrt{1-\sqrt{1-C^2}}$")
-    ax.legend(fontsize=10)
-    fig.savefig(plot_path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print(f"\n    Plot → {plot_path}")
 
     result = {
         "t_values":           t_values,
@@ -2325,18 +2453,31 @@ def run_t_dependence_gme(
         "C_analytical_n2":    C_analytical_n2,
         "C_wootters_n2":      C_wootters_n2,
         "purity":             purity_dict,
+        "entropy":            entropy_dict,
+        "rank":               rank_dict,
+        "convergence":        convergence,   # {n: [solver detail per t] } — standard _gme_lower_bound format
         "n_values":           n_values,
         "solver":             solver,
-        "system_info":        dict(L=L, U=U, mode=mode, Ne=n_electrons),
+        "system_info":        dict(L=L, U=U, V=V, mode=mode, Ne=n_electrons),
+        # which state each grid point used: ground state, or the first
+        # excited singlet (whose index moves through level crossings)
+        "excited_singlet": bool(excited_singlet),
+        "singlet_k":       int(singlet_k),
+        "singlet_idx":     singlet_idx,
+        "singlet_energy":  singlet_energy,
         "plot_path":          plot_path,
         "run_timestamp":      ts,
     }
+
+    # Finalized (replot-style) figure, produced automatically from the result
+    plot_scan_finalized(result, plot_path, spin_preserving=spin_preserving)
+    print(f"\n    Plot → {plot_path}")
 
     if save_pkl or use_pkl_cache:
         metadata = {
             "analysis_type": "t_dependence",
             "cache_version": cache_version,
-            "L": int(L), "U": float(U),
+            "L": int(L), "U": float(U), "V": float(V),
             "mode": str(mode), "Ne": int(n_electrons),
             "n_min": int(n_min), "n_max": int(n_max),
             "n_values": list(n_values),
@@ -2443,13 +2584,15 @@ def _make_figure_tT_surface(
     mode: str,
     solver: str = "gcg",
     spin_preserving: bool = True,
-    werner_n2: bool = True,
+    werner_n2: bool = False,   # Werner is NOT a valid n=2 GME; show the convex roof
 ) -> plt.Figure:
     """
     3D surface plot C_GME(t/U, T): one 3D panel per body-order n.
 
-    x-axis = t/U, y-axis = Temperature T, z-axis = C_GME. For n=2 the
-    Werner-state measure sqrt(1-sqrt(1-C^2)) is shown (werner_n2=True).
+    x-axis = t/U, y-axis = Temperature T, z-axis = C_GME. Every panel shows the
+    convex roof as stored, n=2 included (for n=2 that equals the Wootters
+    concurrence). The legacy Werner mapping is off by default and kept only to
+    reproduce old figures.
     """
     from mpl_toolkits.mplot3d import Axes3D  # noqa: F401  (registers 3d proj)
     from matplotlib.ticker import MaxNLocator
@@ -2521,12 +2664,14 @@ def _make_figure_tT_heatmap(
     mode: str,
     solver: str = "gcg",
     spin_preserving: bool = True,
-    werner_n2: bool = True,
+    werner_n2: bool = False,   # Werner is NOT a valid n=2 GME; show the convex roof
 ) -> plt.Figure:
     """
     2D heatmap of C_GME(t/U, T): one panel per body-order n.
     x-axis = t/U, y-axis = Temperature T, colour = C_GME. Cleaner than the 3D
-    surface for print. For n=2 the Werner measure sqrt(1-sqrt(1-C^2)) is shown.
+    surface for print. Every panel shows the convex roof as stored, n=2 included
+    (for n=2 that equals the Wootters concurrence). The legacy Werner mapping is
+    off by default and kept only to reproduce old figures.
     """
     from matplotlib.ticker import MaxNLocator
 
@@ -2738,6 +2883,9 @@ def run_tT_surface_gme(
     cache_version: str = "v1",
     force_recompute: bool = False,
     n_max: Optional[int] = None,
+    V: float = 0.0,
+    excited_singlet: bool = False,
+    singlet_k: int = 0,
 ) -> dict:
     """
     Compute the 3D thermal-GME surface C_GME(n; t/U, T).
@@ -2823,6 +2971,14 @@ def run_tT_surface_gme(
     n_t, n_T = len(t_values), len(T_values)
     C_surface: dict[int, np.ndarray] = {n: np.zeros((n_t, n_T)) for n in n_values}
     purity_surface: dict[int, np.ndarray] = {n: np.zeros((n_t, n_T)) for n in n_values}
+    # entropy / rank / solver-convergence stored on the same (n_t, n_T) grid, so
+    # the surface PKL is as self-contained as the t-scan and U-scan PKLs
+    entropy_surface: dict[int, np.ndarray] = {
+        n: np.full((n_t, n_T), np.nan) for n in n_values}
+    rank_surface: dict[int, np.ndarray] = {
+        n: np.full((n_t, n_T), -1, dtype=int) for n in n_values}
+    convergence_surface: dict[int, list] = {
+        n: [[None] * n_T for _ in range(n_t)] for n in n_values}
     tag = "C_GCG" if solver == "gcg" else "C_LB"
 
     # Per-job checkpointing: each (ti, Ti, n) GME result is written to its own
@@ -2833,7 +2989,8 @@ def run_tT_surface_gme(
     do_cache = bool(use_pkl_cache)
     n_reused, n_computed = 0, 0
 
-    def _persist_surface_job(ti_, Ti_, n_, c_val, pur, elapsed, detail=None):
+    def _persist_surface_job(ti_, Ti_, n_, c_val, pur, elapsed, detail=None,
+                             ent=float("nan"), rank=-1):
         if not (do_cache and save_pkl):
             return
         p = _surface_gme_job_cache_path(run_key=run_key, ti=ti_, Ti=Ti_, n=n_)
@@ -2858,6 +3015,9 @@ def run_tT_surface_gme(
             },
             "result": {
                 "C_value": float(c_val), "purity": float(pur),
+                # entropy + rank stored per job so a cache reload restores the
+                # full metric set without touching the RDM again
+                "entropy": float(ent), "rank": int(rank),
                 "elapsed_seconds": float(elapsed),
                 "spin_preserving": bool(spin_preserving),
             },
@@ -2884,6 +3044,12 @@ def run_tT_surface_gme(
                 if cached is not None:
                     C_surface[n][ti, Ti] = float(cached["result"]["C_value"])
                     purity_surface[n][ti, Ti] = float(cached["result"]["purity"])
+                    # older job caches predate entropy/rank — fall back to NaN/-1
+                    _res = cached["result"]
+                    entropy_surface[n][ti, Ti] = float(
+                        _res.get("entropy", float("nan")))
+                    rank_surface[n][ti, Ti] = int(_res.get("rank", -1))
+                    convergence_surface[n][ti][Ti] = cached.get("result_full")
                     n_slice_reused += 1
                 else:
                     missing.append((Ti, n))
@@ -2929,10 +3095,17 @@ def run_tT_surface_gme(
 
         # 4. Build ONLY the missing GME jobs for this t-slice.
         jobs = []
+        # entropy/rank come straight from the RDM, so compute them here where
+        # Gamma_T exists rather than shipping the matrix back from the worker
+        metrics_by_job: dict[tuple[int, int], tuple[float, int]] = {}
         for (Ti, n) in missing:
             active, probs_active = active_by_Ti[Ti]
             Gamma_T = np.einsum("m,mij->ij", probs_active, bank[n][active])
             Gamma_T = normalize_density_matrix(Gamma_T)
+            metrics_by_job[(Ti, n)] = (
+                float(compute_entropy(Gamma_T)),
+                int(np.sum(np.real(np.linalg.eigvalsh(Gamma_T)) > 1e-10)),
+            )
             jobs.append((
                 Ti, float(T_values[Ti]), n, Gamma_T,
                 solver, n_restarts, max_iter, tol, k_max_extra,
@@ -2956,14 +3129,24 @@ def run_tT_surface_gme(
                 ):
                     C_surface[n][ti, Ti] = c_val
                     purity_surface[n][ti, Ti] = pur
-                    _persist_surface_job(ti, Ti, n, c_val, pur, elapsed, detail)
+                    _ent, _rk = metrics_by_job[(Ti, n)]
+                    entropy_surface[n][ti, Ti] = _ent
+                    rank_surface[n][ti, Ti] = _rk
+                    convergence_surface[n][ti][Ti] = detail
+                    _persist_surface_job(ti, Ti, n, c_val, pur, elapsed, detail,
+                                         ent=_ent, rank=_rk)
                     n_computed += 1
         else:
             for job in jobs:
                 Ti, T, n, c_val, pur, elapsed, _jp, _gh, detail = _thermal_gme_worker(job)
                 C_surface[n][ti, Ti] = c_val
                 purity_surface[n][ti, Ti] = pur
-                _persist_surface_job(ti, Ti, n, c_val, pur, elapsed, detail)
+                _ent, _rk = metrics_by_job[(Ti, n)]
+                entropy_surface[n][ti, Ti] = _ent
+                rank_surface[n][ti, Ti] = _rk
+                convergence_surface[n][ti][Ti] = detail
+                _persist_surface_job(ti, Ti, n, c_val, pur, elapsed, detail,
+                                     ent=_ent, rank=_rk)
                 n_computed += 1
 
         if verbose:
@@ -2988,10 +3171,14 @@ def run_tT_surface_gme(
         "t_over_U":        t_values / U,
         "C_surface":       C_surface,
         "purity_surface":  purity_surface,
+        # same self-contained metric set the t-scan / U-scan PKLs carry
+        "entropy_surface": entropy_surface,   # {n: (n_t, n_T)}
+        "rank_surface":    rank_surface,      # {n: (n_t, n_T)}
+        "convergence":     convergence_surface,  # {n: [[detail per T] per t]} — standard _gme_lower_bound format
         "n_values":        n_values,
         "solver":          solver,
         "spin_preserving": bool(spin_preserving),
-        "system_info":     dict(L=L, U=U, mode=mode, Ne=n_electrons),
+        "system_info":     dict(L=L, U=U,V=V, mode=mode, Ne=n_electrons),
         "run_timestamp":   ts,
         "loaded_from_cache": False,
         "cache_path":      None,
@@ -3004,7 +3191,7 @@ def run_tT_surface_gme(
         metadata = {
             "analysis_type": "tT_surface",
             "cache_version": cache_version,
-            "L": int(L), "U": float(U),
+            "L": int(L), "U": float(U), "V": float(V),
             "mode": str(mode), "Ne": int(n_electrons),
             "n_min": int(n_min), "n_max": int(n_max),
             "n_values": list(n_values),
@@ -3047,16 +3234,56 @@ def _uscan_cache_path(
     U_values: np.ndarray,
     cache_version: str,
     spin_preserving: bool = True,
+    excited_singlet: bool = False,
+    V: float = 0.0,
 ) -> Path:
     """Deterministic PKL path for one U-scan run."""
     U_arr = np.asarray(U_values, dtype=float)
     filename = (
         f"uscan_{cache_version}_"
         f"L{L}_Ne{n_electrons}_t{_safe_float_tag(t)}_"
-        f"mode-{mode}_nmin{n_min}_solver-{solver}_{_sector_tag(spin_preserving)}_"
+        f"mode-{mode}_nmin{n_min}_solver-{solver}_"
+        f"{_sector_tag(spin_preserving)}"
+        # tags added ONLY when set, so existing ground-state / V=0 PKLs keep
+        # their names and stay cache-reusable
+        f"{'_es' if excited_singlet else ''}"
+        f"{('_V' + _safe_float_tag(float(V))) if abs(V) > 1e-12 else ''}_"
         f"restarts{int(n_restarts)}_iter{int(max_iter)}_"
         f"kmax{int(k_max_extra)}_tol{_safe_float_tag(float(tol))}_"
         f"{_grid_tag(U_arr, 'U')}-{_array_digest(U_arr)}.pkl"
+    )
+    return _thermal_runs_dir() / filename
+
+
+def _vscan_cache_path(
+    *,
+    L: int,
+    U: float,
+    t: float,
+    mode: str,
+    n_electrons: int,
+    n_min: int,
+    solver: str,
+    n_restarts: int,
+    max_iter: int,
+    tol: float,
+    k_max_extra: int,
+    V_values: np.ndarray,
+    cache_version: str,
+    spin_preserving: bool = True,
+    excited_singlet: bool = False,
+) -> Path:
+    """Deterministic PKL path for one V-scan run (fixed U and t; V swept)."""
+    V_arr = np.asarray(V_values, dtype=float)
+    filename = (
+        f"vscan_{cache_version}_"
+        f"L{L}_Ne{n_electrons}_U{_safe_float_tag(U)}_t{_safe_float_tag(t)}_"
+        f"mode-{mode}_nmin{n_min}_solver-{solver}_"
+        f"{_sector_tag(spin_preserving)}"
+        f"{'_es' if excited_singlet else ''}_"
+        f"restarts{int(n_restarts)}_iter{int(max_iter)}_"
+        f"kmax{int(k_max_extra)}_tol{_safe_float_tag(float(tol))}_"
+        f"{_grid_tag(V_arr, 'V')}-{_array_digest(V_arr)}.pkl"
     )
     return _thermal_runs_dir() / filename
 
@@ -3101,6 +3328,7 @@ def run_U_dependence_gme(
     L: int,
     U_values: np.ndarray,
     t: float,
+    V: float = 0.0,
     mode: str = "uniform",
     n_electrons: Optional[int] = None,
     n_min: int = 2,
@@ -3117,6 +3345,8 @@ def run_U_dependence_gme(
     cache_version: str = "v1",
     force_recompute: bool = False,
     spin_preserving: bool = True,
+    excited_singlet: bool = False,
+    singlet_k: int = 12,
 ) -> dict:
     """
     Compute C_GME(n) at T=0 for each value of U (fixing t).
@@ -3154,6 +3384,8 @@ def run_U_dependence_gme(
         max_iter=max_iter, tol=tol, k_max_extra=k_max_extra,
         U_values=U_values, cache_version=cache_version,
         spin_preserving=spin_preserving,
+        excited_singlet=excited_singlet,
+        V=V,
     )
 
     if use_pkl_cache and not force_recompute and cache_path.exists():
@@ -3167,25 +3399,7 @@ def run_U_dependence_gme(
             output_dir,
             f"{prefix}task4_uscan_GME_L{L}_t{t}_{_sector_tag(spin_preserving)}_{_grid_tag(np.asarray(result['U_values']), 'U')}_{ts}.pdf"
         )
-        U_vals = np.asarray(result["U_values"])
-        n_vals = result["n_values"]
-        n_max_r = max(n_vals)
-        n_min_r = min(n_vals)
-        fig = _make_figure_U(
-            U_vals, t, result["C_GME"], n_vals, L, mode,
-            solver=result.get("solver", solver),
-            spin_preserving=spin_preserving,
-        )
-        ax = fig.axes[0]
-        ax.plot(
-            U_vals / t, result["C_exact_nL"],
-            color=_COLORS[(n_max_r - n_min_r) % len(_COLORS)],
-            ls="--", lw=1.5,
-            label=f"Exact C_GME(n={n_max_r})",
-        )
-        ax.legend(fontsize=10)
-        fig.savefig(plot_path, dpi=150, bbox_inches="tight")
-        plt.close(fig)
+        plot_scan_finalized(result, plot_path, spin_preserving=spin_preserving)
         result["plot_path"] = plot_path
         print(f"\n[cache] loaded U-scan PKL → {cache_path}")
         print(f"[cache] regenerated plot → {plot_path}")
@@ -3201,7 +3415,16 @@ def run_U_dependence_gme(
 
     C_GME: dict[int, np.ndarray] = {n: np.zeros(len(U_values)) for n in n_values}
     purity_dict: dict[int, np.ndarray] = {n: np.zeros(len(U_values)) for n in n_values}
+    entropy_dict: dict[int, np.ndarray] = {n: np.zeros(len(U_values)) for n in n_values}
+    rank_dict: dict[int, np.ndarray] = {n: np.zeros(len(U_values), dtype=int) for n in n_values}
+    convergence: dict[int, list] = {n: [None] * len(U_values) for n in n_values}
+    # which eigenstate was actually used at each grid point (excited-singlet mode);
+    # its index moves with the parameter through level crossings, so it is recorded
+    singlet_idx: np.ndarray = np.full(len(U_values), -1, dtype=int)
+    singlet_energy: np.ndarray = np.full(len(U_values), np.nan)
     C_exact: np.ndarray = np.zeros(len(U_values))
+    C_wootters_n2: np.ndarray = np.full(len(U_values), np.nan)
+    C_analytical_n2: np.ndarray = np.full(len(U_values), np.nan)
     tag = "C_GCG" if solver == "gcg" else "C_LB"
 
     for i, U in enumerate(U_values):
@@ -3209,21 +3432,44 @@ def run_U_dependence_gme(
             print(f"\n  U={U:.4g} (U/t={U/t:.4f}) …", flush=True)
 
         energies, eigvecs, n_so = compute_all_eigenstates(
-            L, t, U, mode, n_electrons, spin_preserving=spin_preserving,
+            L, t, U,mode, n_electrons, spin_preserving=spin_preserving,V=V,
         )
-        E0 = energies[0]
-        psi0 = eigvecs[:, 0]
+        if excited_singlet:
+            # Re-use the existing spin-resolved search. The index of the first
+            # excited singlet is NOT fixed — level crossings move it as U
+            # varies — so it must be located at every grid point.
+            info = find_first_excited_singlet(
+                L=L, t=t, U=float(U),V=V, mode=mode,
+                n_electrons=n_electrons, k=singlet_k,
+                spin_preserving=spin_preserving,   # must match the RDM ops
+            )
+            E0 = float(info["energy"])
+            psi0 = np.asarray(info["psi"])
+            singlet_idx[i] = int(info["idx"])
+            singlet_energy[i] = E0
+            if verbose:
+                print(f"    first excited singlet: idx={info['idx']}  "
+                      f"E={E0:.8f}", flush=True)
+        else:
+            E0 = energies[0]
+            psi0 = eigvecs[:, 0]
 
         degen = np.where(np.abs(energies - E0) < 1e-10)[0]
         if len(degen) > 1 and verbose:
-            print(f"    [WARN] {len(degen)}-fold degenerate ground state")
+            _lbl = "excited singlet" if excited_singlet else "ground state"
+            print(f"    [WARN] {len(degen)}-fold degenerate {_lbl}")
 
         for n in n_values:
             sites = tuple(range(n))
             ops = _precompute_ops(sites, n_so, n_electrons,
                                   spin_preserving=spin_preserving)
 
-            if len(degen) == 1:
+            if len(degen) <= 1:
+                # <=1: non-degenerate state — use psi0 directly. This also
+                # guards the excited-singlet path where E0 comes from a
+                # separate diagonalisation: if it fails to match any entry in
+                # `energies` (degen empty), fall back to psi0 instead of
+                # dividing a zero matrix by 0 (which produced silent NaNs).
                 rho_raw = _rdm_from_ops(ops, psi0, n)
             else:
                 dim = 2 ** n
@@ -3242,9 +3488,17 @@ def run_U_dependence_gme(
             )
             C_GME[n][i] = c_val
             purity_dict[n][i] = pur
+            # entropy + rank stored alongside purity so the PKL is self-contained
+            entropy_dict[n][i] = float(compute_entropy(rho))
+            rank_dict[n][i] = int(np.sum(np.real(np.linalg.eigvalsh(rho)) > 1e-10))
+            convergence[n][i] = _detail    # full solver detail (standard format)
 
             if n == n_max:
                 C_exact[i] = float(compute_C_GME_pure(rho, n_max))
+
+            if n == 2:                       # analytic bipartite references
+                C_analytical_n2[i] = _cgme_analytical_n2(rho)
+                C_wootters_n2[i]   = _wootters_concurrence(rho)
 
         if verbose:
             print("    " + "  ".join(
@@ -3257,35 +3511,40 @@ def run_U_dependence_gme(
     plot_path = os.path.join(
         output_dir, f"{prefix}task4_uscan_GME_L{L}_t{t}_{_sector_tag(spin_preserving)}_{_grid_tag(U_values, 'U')}_{ts}.pdf"
     )
-    fig = _make_figure_U(U_values, t, C_GME, n_values, L, mode,
-                         solver=solver, spin_preserving=spin_preserving)
-
-    ax = fig.axes[0]
-    ax.plot(U_values / t, C_exact, color=_COLORS[(n_max - n_min) % len(_COLORS)],
-            ls="--", lw=1.5, label=f"Exact C_GME(n={n_max})")
-    ax.legend(fontsize=10)
-    fig.savefig(plot_path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print(f"\n    Plot → {plot_path}")
 
     result = {
         "U_values":      U_values,
         "U_over_t":      U_values / t,
         "C_GME":         C_GME,
         "C_exact_nL":    C_exact,
+        "C_wootters_n2": C_wootters_n2,
+        "C_analytical_n2": C_analytical_n2,
         "purity":        purity_dict,
+        "entropy":       entropy_dict,
+        "rank":          rank_dict,
+        "convergence":   convergence,   # {n: [solver detail per U]} — standard _gme_lower_bound format
         "n_values":      n_values,
         "solver":        solver,
-        "system_info":   dict(L=L, t=t, mode=mode, Ne=n_electrons),
+        "system_info":   dict(L=L, t=t,V=V, mode=mode, Ne=n_electrons),
+        # which state each grid point used: ground state, or the first
+        # excited singlet (whose index moves through level crossings)
+        "excited_singlet": bool(excited_singlet),
+        "singlet_k":       int(singlet_k),
+        "singlet_idx":     singlet_idx,
+        "singlet_energy":  singlet_energy,
         "plot_path":     plot_path,
         "run_timestamp": ts,
     }
+
+    # Finalized (replot-style) figure, produced automatically from the result
+    plot_scan_finalized(result, plot_path, spin_preserving=spin_preserving)
+    print(f"\n    Plot → {plot_path}")
 
     if save_pkl or use_pkl_cache:
         metadata = {
             "analysis_type": "U_dependence",
             "cache_version": cache_version,
-            "L": int(L), "t": float(t),
+            "L": int(L), "t": float(t), "V": float(V),
             "mode": str(mode), "Ne": int(n_electrons),
             "n_min": int(n_min), "n_max": int(n_max),
             "n_values": list(n_values),
@@ -3303,5 +3562,232 @@ def run_U_dependence_gme(
         result["pkl_path"] = str(cache_path)
         result["cache_path"] = str(cache_path)
         print(f"    U-scan PKL → {cache_path}")
+
+    return result
+
+
+def run_V_dependence_gme(
+    L: int,
+    V_values: np.ndarray,
+    t: float,
+    U: float,
+    mode: str = "uniform",
+    n_electrons: Optional[int] = None,
+    n_min: int = 2,
+    output_dir: str = "outputs",
+    output_prefix: str = "",
+    solver: str = "gcg",
+    n_restarts: int = 20,
+    max_iter: int = 300,
+    tol: float = 1e-9,
+    k_max_extra: int = 4,
+    verbose: bool = True,
+    save_pkl: bool = True,
+    use_pkl_cache: bool = False,
+    cache_version: str = "v1",
+    force_recompute: bool = False,
+    spin_preserving: bool = True,
+    excited_singlet: bool = False,
+    singlet_k: int = 12,
+) -> dict:
+    """
+    Compute C_GME(n) at T=0 for each value of the nearest-neighbour interaction
+    V (fixing t and U) — the extended-Hubbard V-scan.
+
+    The x-axis is V/t. As V grows past ~U/2 the ring crosses from the Mott/SDW
+    regime into a charge-density-wave (CDW) state, and short-range C_GME
+    collapses — the transition shows up directly as a curve.
+
+    Structurally identical to ``run_U_dependence_gme`` with U and V swapped:
+    here U is fixed and V is swept.
+
+    Returns
+    -------
+    dict
+        V_values, V_over_t, C_GME {n: array}, purity {n: array},
+        system_info, plot_path
+    """
+    if n_electrons is None:
+        n_electrons = L
+    n_max = L
+    n_values = list(range(n_min, n_max + 1))
+    V_values = np.asarray(V_values, dtype=float)
+    ts = _run_timestamp()
+
+    cache_path = _vscan_cache_path(
+        L=L, U=U, t=t, mode=mode, n_electrons=n_electrons,
+        n_min=n_min, solver=solver, n_restarts=n_restarts,
+        max_iter=max_iter, tol=tol, k_max_extra=k_max_extra,
+        V_values=V_values, cache_version=cache_version,
+        spin_preserving=spin_preserving, excited_singlet=excited_singlet,
+    )
+
+    if use_pkl_cache and not force_recompute and cache_path.exists():
+        payload = _load_thermal_result_pkl(cache_path)
+        result = dict(payload["result"])
+        result["loaded_from_cache"] = True
+        result["cache_path"] = str(cache_path)
+        os.makedirs(output_dir, exist_ok=True)
+        prefix = f"{output_prefix}_" if output_prefix else ""
+        plot_path = os.path.join(
+            output_dir,
+            f"{prefix}task4_vscan_GME_L{L}_U{U}_t{t}_{_sector_tag(spin_preserving)}_{_grid_tag(np.asarray(result['V_values']), 'V')}_{ts}.pdf"
+        )
+        plot_scan_finalized(result, plot_path, spin_preserving=spin_preserving)
+        result["plot_path"] = plot_path
+        print(f"\n[cache] loaded V-scan PKL → {cache_path}")
+        print(f"[cache] regenerated plot → {plot_path}")
+        return result
+
+    print(f"\n{'='*64}")
+    print(f"  V-DEPENDENCE GME SCAN (T=0)")
+    print(f"{'='*64}")
+    print(f"  L={L}  U={U}  t={t}  Ne={n_electrons}  mode={mode}")
+    print(f"  V range [{V_values[0]:.4g}, {V_values[-1]:.4g}]  ({len(V_values)} points)")
+    print(f"  n = {n_min}..{n_max}")
+    print(f"{'-'*64}")
+
+    C_GME: dict[int, np.ndarray] = {n: np.zeros(len(V_values)) for n in n_values}
+    purity_dict: dict[int, np.ndarray] = {n: np.zeros(len(V_values)) for n in n_values}
+    entropy_dict: dict[int, np.ndarray] = {n: np.zeros(len(V_values)) for n in n_values}
+    rank_dict: dict[int, np.ndarray] = {n: np.zeros(len(V_values), dtype=int) for n in n_values}
+    convergence: dict[int, list] = {n: [None] * len(V_values) for n in n_values}
+    singlet_idx: np.ndarray = np.full(len(V_values), -1, dtype=int)
+    singlet_energy: np.ndarray = np.full(len(V_values), np.nan)
+    C_exact: np.ndarray = np.zeros(len(V_values))
+    C_wootters_n2: np.ndarray = np.full(len(V_values), np.nan)
+    C_analytical_n2: np.ndarray = np.full(len(V_values), np.nan)
+    tag = "C_GCG" if solver == "gcg" else "C_LB"
+
+    for i, V in enumerate(V_values):
+        if verbose:
+            print(f"\n  V={V:.4g} (V/t={V/t:.4f}) …", flush=True)
+
+        energies, eigvecs, n_so = compute_all_eigenstates(
+            L, t, U, mode, n_electrons, spin_preserving=spin_preserving, V=V,
+        )
+        if excited_singlet:
+            # The first-excited-singlet index moves with V through level
+            # crossings, so re-locate it at every grid point.
+            info = find_first_excited_singlet(
+                L=L, t=t, U=float(U), V=V, mode=mode,
+                n_electrons=n_electrons, k=singlet_k,
+                spin_preserving=spin_preserving,
+            )
+            E0 = float(info["energy"])
+            psi0 = np.asarray(info["psi"])
+            singlet_idx[i] = int(info["idx"])
+            singlet_energy[i] = E0
+            if verbose:
+                print(f"    first excited singlet: idx={info['idx']}  "
+                      f"E={E0:.8f}", flush=True)
+        else:
+            E0 = energies[0]
+            psi0 = eigvecs[:, 0]
+
+        degen = np.where(np.abs(energies - E0) < 1e-10)[0]
+        if len(degen) > 1 and verbose:
+            _lbl = "excited singlet" if excited_singlet else "ground state"
+            print(f"    [WARN] {len(degen)}-fold degenerate {_lbl}")
+
+        for n in n_values:
+            sites = tuple(range(n))
+            ops = _precompute_ops(sites, n_so, n_electrons,
+                                  spin_preserving=spin_preserving)
+
+            if len(degen) <= 1:
+                # <=1: non-degenerate state — use psi0 directly. This also
+                # guards the excited-singlet path where E0 comes from a
+                # separate diagonalisation: if it fails to match any entry in
+                # `energies` (degen empty), fall back to psi0 instead of
+                # dividing a zero matrix by 0 (which produced silent NaNs).
+                rho_raw = _rdm_from_ops(ops, psi0, n)
+            else:
+                dim = 2 ** n
+                rho_raw = np.zeros((dim, dim), dtype=complex)
+                for d_idx in degen:
+                    rho_raw += _rdm_from_ops(ops, eigvecs[:, d_idx], n)
+                rho_raw /= len(degen)
+
+            tr = np.real(np.trace(rho_raw))
+            rho = rho_raw / tr if abs(tr) > 1e-14 else rho_raw
+
+            c_val, pur, _detail = _gme_lower_bound(
+                rho, n,
+                solver=solver, n_restarts=n_restarts,
+                max_iter=max_iter, tol=tol, k_max_extra=k_max_extra,
+            )
+            C_GME[n][i] = c_val
+            purity_dict[n][i] = pur
+            entropy_dict[n][i] = float(compute_entropy(rho))
+            rank_dict[n][i] = int(np.sum(np.real(np.linalg.eigvalsh(rho)) > 1e-10))
+            convergence[n][i] = _detail
+
+            if n == n_max:
+                C_exact[i] = float(compute_C_GME_pure(rho, n_max))
+
+            if n == 2:
+                C_analytical_n2[i] = _cgme_analytical_n2(rho)
+                C_wootters_n2[i]   = _wootters_concurrence(rho)
+
+        if verbose:
+            print("    " + "  ".join(
+                f"{tag}(n={n})={C_GME[n][i]:.4f}" for n in n_values
+            ))
+
+    # Plot
+    os.makedirs(output_dir, exist_ok=True)
+    prefix = f"{output_prefix}_" if output_prefix else ""
+    plot_path = os.path.join(
+        output_dir, f"{prefix}task4_vscan_GME_L{L}_U{U}_t{t}_{_sector_tag(spin_preserving)}_{_grid_tag(V_values, 'V')}_{ts}.pdf"
+    )
+
+    result = {
+        "V_values":      V_values,
+        "V_over_t":      V_values / t,
+        "C_GME":         C_GME,
+        "C_exact_nL":    C_exact,
+        "C_wootters_n2": C_wootters_n2,
+        "C_analytical_n2": C_analytical_n2,
+        "purity":        purity_dict,
+        "entropy":       entropy_dict,
+        "rank":          rank_dict,
+        "convergence":   convergence,
+        "n_values":      n_values,
+        "solver":        solver,
+        "system_info":   dict(L=L, t=t, U=U, mode=mode, Ne=n_electrons),
+        "excited_singlet": bool(excited_singlet),
+        "singlet_k":       int(singlet_k),
+        "singlet_idx":     singlet_idx,
+        "singlet_energy":  singlet_energy,
+        "plot_path":     plot_path,
+        "run_timestamp": ts,
+    }
+
+    plot_scan_finalized(result, plot_path, spin_preserving=spin_preserving)
+    print(f"\n    Plot → {plot_path}")
+
+    if save_pkl or use_pkl_cache:
+        metadata = {
+            "analysis_type": "V_dependence",
+            "cache_version": cache_version,
+            "L": int(L), "t": float(t), "U": float(U),
+            "mode": str(mode), "Ne": int(n_electrons),
+            "n_min": int(n_min), "n_max": int(n_max),
+            "n_values": list(n_values),
+            "V_values": V_values.tolist(),
+            "V_digest": _array_digest(V_values),
+            "solver": solver, "n_restarts": int(n_restarts),
+            "max_iter": int(max_iter), "tol": float(tol),
+            "k_max_extra": int(k_max_extra),
+            "plot_path": plot_path,
+            "run_timestamp": ts,
+        }
+        _save_thermal_result_pkl(
+            cache_path=cache_path, metadata=metadata, result=result
+        )
+        result["pkl_path"] = str(cache_path)
+        result["cache_path"] = str(cache_path)
+        print(f"    V-scan PKL → {cache_path}")
 
     return result

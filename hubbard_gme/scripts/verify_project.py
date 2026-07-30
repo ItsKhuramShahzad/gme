@@ -392,8 +392,42 @@ def mode_smoke(args: argparse.Namespace) -> int:
     return run_cmd(cmd)
 
 
+def mode_extended_v(_: argparse.Namespace) -> int:
+    """Verify the extended-Hubbard V term: V=0 regression, V>0 effect, import."""
+    add_src_to_path()
+    errors = 0
+    try:
+        from hubbard_gme.hamiltonian import compute_all_eigenstates
+        from hubbard_gme.thermal_pipeline import run_V_dependence_gme  # noqa: F401
+        ok("Extended-V: run_V_dependence_gme importable")
+
+        E_def = compute_all_eigenstates(4, 1.0, 4.0, "uniform", 4,
+                                        spin_preserving=False)[0]
+        E_v0 = compute_all_eigenstates(4, 1.0, 4.0, "uniform", 4, V=0.0,
+                                       spin_preserving=False)[0]
+        E_v5 = compute_all_eigenstates(4, 1.0, 4.0, "uniform", 4, V=5.0,
+                                       spin_preserving=False)[0]
+
+        if abs(float(E_v0[0]) - float(E_def[0])) < 1e-9:
+            ok("Extended-V: V=0 reproduces the plain Hubbard ground state")
+        else:
+            fail("Extended-V: V=0 does not match the default (V-term leaks)")
+            errors += 1
+
+        if abs(float(E_v0[0]) - float(E_v5[0])) > 1e-6:
+            ok(f"Extended-V: V changes E0 ({E_v0[0]:.4f} -> {E_v5[0]:.4f})")
+        else:
+            fail("Extended-V: V had no effect on E0 (not threaded)")
+            errors += 1
+    except Exception as exc:
+        fail(f"Extended-V check failed: {exc}")
+        errors += 1
+    return 0 if errors == 0 else 3
+
+
 def mode_all(args: argparse.Namespace) -> int:
-    modes = [mode_static, mode_deps, mode_imports, mode_pytest_light]
+    modes = [mode_static, mode_deps, mode_imports, mode_extended_v,
+             mode_pytest_light]
     for fn in modes:
         rc = fn(args)
         if rc != 0:
@@ -411,7 +445,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Verify Hubbard GME project")
     p.add_argument("--mode", required=True,
                    choices=[
-                       "static", "deps", "imports",
+                       "static", "deps", "imports", "extended-v",
                        "pytest-light", "pytest-all",
                        "artifacts", "cache-rdm", "cache-gme",
                        "smoke", "all",
@@ -433,6 +467,7 @@ def main() -> int:
         "static": mode_static,
         "deps": mode_deps,
         "imports": mode_imports,
+        "extended-v": mode_extended_v,
         "pytest-light": mode_pytest_light,
         "pytest-all": mode_pytest_all,
         "artifacts": mode_artifacts,

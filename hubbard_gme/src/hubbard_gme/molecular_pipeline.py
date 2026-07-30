@@ -216,6 +216,8 @@ _MOL_META_KEYS = (
     "ncore", "nele_cas", "norb_cas", "n_so", "hilbert_dim", "hf_energy",
     "E0", "E1", "gap", "S2", "S", "Sz", "spin_label",
     "double_occ", "double_occ_per_site", "cr_methods", "cr_restarts",
+    # provenance for external-CI runs (absent/ignored for diagonalised runs)
+    "wavefunction_source", "psi_source",
 )
 _GCG_SETTING_KEYS = (
     "k_converged", "converged", "completed_successfully", "measure",
@@ -231,6 +233,15 @@ def _mol_gme_pkl_dir(mol_name: str) -> Path:
     return d
 
 
+def _cr_settings_tag(cr_method: str, cr_restarts: int, cr_max_iter: int,
+                     cr_k_max_extra: int) -> str:
+    """Solver-settings fingerprint embedded in the PKL name (Hubbard convention),
+    so a re-run with the SAME settings reuses the cache and a re-run with
+    DIFFERENT settings recomputes automatically."""
+    return (f"{cr_method}_restarts{int(cr_restarts)}_iter{int(cr_max_iter)}"
+            f"_kmax{int(cr_k_max_extra)}")
+
+
 def _save_molecular_gme_pkl(
     *,
     mol_name: str,
@@ -241,12 +252,14 @@ def _save_molecular_gme_pkl(
     mol_info: dict,
     metrics_entry: dict,
     cache_version: str = "v1",
+    cr_tag: str = "",
 ) -> str:
     """Save one (molecule, CAS, cluster) GME result to a self-contained PKL."""
     n = len(sites)
     sites_str = "-".join(str(s) for s in sites)
+    _t = f"{cr_tag}_" if cr_tag else ""
     fname = (f"molgme_{cache_version}_{mol_name}_{cas_tag}_"
-             f"sites-{sites_str}_n{n}.pkl")
+             f"{_t}sites-{sites_str}_n{n}.pkl")
     path = _mol_gme_pkl_dir(mol_name) / fname
 
     eig = np.linalg.eigvalsh(rho)
@@ -297,6 +310,72 @@ def _save_molecular_gme_pkl(
         pickle.dump(payload, f, protocol=pickle.HIGHEST_PROTOCOL)
     os.replace(tmp, path)
     return str(path)
+
+
+def _load_mol_gme_result(mol_name: str, cas_tag: str, sites: tuple,
+                         cache_version: str = "v1",
+                         cr_tag: str = "") -> Optional[dict]:
+    """Reload a previously-saved cluster GME result (its ``result_full``) so a
+    re-run can reuse instead of recomputing. The ``cr_tag`` (solver settings)
+    is part of the filename, so only a result computed with the SAME settings is
+    reused. Returns None if not on disk. ``result_full`` carries every key the
+    summary and GME PDF read (C_gcg / C_LB / C_LB_best / C_UB / C_expo /
+    status)."""
+    n = len(sites)
+    sites_str = "-".join(str(s) for s in sites)
+    _t = f"{cr_tag}_" if cr_tag else ""
+    path = _mol_gme_pkl_dir(mol_name) / (
+        f"molgme_{cache_version}_{mol_name}_{cas_tag}_"
+        f"{_t}sites-{sites_str}_n{n}.pkl")
+    if not path.exists():
+        return None
+    try:
+        with open(path, "rb") as f:
+            payload = pickle.load(f)
+        rf = payload.get("result_full")
+        return dict(rf) if isinstance(rf, dict) else None
+    except Exception:
+        return None
+
+
+def _cluster_gme_summary(cr_results: dict, norb: int) -> None:
+    """Print mean/spread of C_gcg per body order, and per ring-symmetry class
+    (cyclic gap pattern). Clusters in the same class are symmetry-equivalent and
+    should give the SAME C_GME — a non-zero spread flags solver noise, not
+    physics. (The gap pattern assumes a ring; it is a harmless grouping for
+    non-ring systems.)"""
+    from collections import defaultdict
+
+    def _shape(sites):
+        s = sorted(sites)
+        gaps = sorted((s[(i + 1) % len(s)] - s[i]) % norb for i in range(len(s)))
+        return tuple(gaps)
+
+    by_n, by_cls = defaultdict(list), defaultdict(list)
+    for sites, res in cr_results.items():
+        if res is None:
+            continue
+        c = res.get("C_gcg")
+        if c is None or (isinstance(c, float) and np.isnan(c)):
+            continue
+        by_n[len(sites)].append(float(c))
+        by_cls[(len(sites), _shape(sites))].append(float(c))
+    if not by_n:
+        return
+
+    print("\n  ── C_GME summary (GCG convex roof) ──")
+    print(f"  {'n':>3} {'#':>4} {'mean':>11} {'min':>11} {'max':>11} {'std':>10}")
+    for n in sorted(by_n):
+        v = np.array(by_n[n])
+        print(f"  {n:>3} {len(v):>4} {v.mean():>11.6f} {v.min():>11.6f} "
+              f"{v.max():>11.6f} {v.std():>10.2e}")
+    print("\n  per ring-symmetry class (gap pattern) — same class should match:")
+    print(f"  {'n':>3} {'gaps':>14} {'#':>3} {'mean':>11} {'spread':>10}")
+    for key in sorted(by_cls):
+        n, sig = key
+        v = np.array(by_cls[key])
+        print(f"  {n:>3} {str(sig):>14} {len(v):>3} {v.mean():>11.6f} "
+              f"{(v.max() - v.min()):>10.2e}")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -352,8 +431,144 @@ def _build_molecular_info(
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# External CI wavefunction loader
+# Reconstruct a state vector from a Slater-determinant file (already in a
+# localised basis), so run_molecular_analysis can analyse it via psi_external.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# occupation character -> electrons on that spatial orbital
+_OCC_ELECTRONS = {"0": 0, "a": 1, "b": 1, "2": 2}
+
+
+def _occ_to_orbitals(occ: str) -> set:
+    """Occupation string -> set of occupied spin-orbitals (index 2*site+spin,
+    spin 0 = up, 1 = down — matching _precompute_mol_ops)."""
+    orbitals: set = set()
+    for k, ch in enumerate(occ):
+        if ch == "a":
+            orbitals.add(2 * k)
+        elif ch == "b":
+            orbitals.add(2 * k + 1)
+        elif ch == "2":
+            orbitals.add(2 * k)
+            orbitals.add(2 * k + 1)
+        # '0' -> nothing
+    return orbitals
+
+
+def load_ci_wavefunction(
+    ci_file: str,
+    norb: int = 6,
+    ne: Optional[int] = None,
+    *,
+    spin_preserving: bool = True,
+    s2_tol: float = 1e-4,
+    verbose: bool = True,
+) -> np.ndarray:
+    """
+    Reconstruct the state vector ``psi`` from an external Slater-determinant file.
+
+    File format: one determinant per line, ``<index> <coefficient> <occ-string>``,
+    where the occupation string has one character per spatial orbital
+    (``0`` empty, ``a`` single up, ``b`` single down, ``2`` doubly occupied).
+
+    The reconstruction discovers openfermion's basis ordering by reading the
+    diagonals of the number operators (Hamiltonian-free — the basis is fixed),
+    then drops each coefficient into its slot. It is validated by ``<S^2> ~ 0``
+    (a singlet): a non-zero value means the file's determinant-ordering / sign
+    convention does not match openfermion's, and the load is rejected rather
+    than returning a silently-wrong state.
+
+    Returns the normalised state vector (length = Sz=0 basis dimension).
+    """
+    from openfermion.ops import FermionOperator
+    from openfermion.linalg import get_number_preserving_sparse_operator
+
+    ne = ne if ne is not None else norb
+    n_so = 2 * norb
+
+    # ── parse: (coefficient, occupation string) per line ────────────────────
+    data: List = []
+    with open(ci_file, "r", encoding="utf-8") as fh:
+        for line in fh:
+            cols = line.split()
+            if len(cols) < 3:
+                continue
+            data.append((float(cols[1]), cols[2]))
+    if not data:
+        raise ValueError(f"no (coeff, occupation) rows parsed from {ci_file!r}")
+
+    # ── validate the raw file: electron count, Sz=0, normalisation ──────────
+    for _c, occ in data:
+        n_e = sum(_OCC_ELECTRONS[ch] for ch in occ)
+        if n_e != ne:
+            raise ValueError(
+                f"determinant {occ!r} has {n_e} electrons, expected {ne}")
+        if occ.count("a") != occ.count("b"):
+            raise ValueError(f"determinant {occ!r} is not in the Sz=0 sector")
+    norm_sq = sum(c * c for c, _ in data)
+
+    # ── discover openfermion's slot ordering via the number operators ───────
+    diags = []
+    dim = None
+    for p in range(n_so):
+        n_p = get_number_preserving_sparse_operator(
+            FermionOperator(((p, 1), (p, 0))), n_so, ne,
+            spin_preserving=spin_preserving)
+        diags.append(np.rint(np.real(n_p.diagonal())).astype(int))
+        dim = n_p.shape[0]
+
+    config_to_index = {}
+    for i in range(dim):
+        occupied = frozenset(p for p in range(n_so) if diags[p][i] == 1)
+        config_to_index[occupied] = i
+
+    # ── assemble psi: drop each coefficient into its slot ───────────────────
+    psi = np.zeros(dim)
+    for coeff, occ in data:
+        key = frozenset(_occ_to_orbitals(occ))
+        slot = config_to_index.get(key)
+        if slot is None:
+            raise KeyError(
+                f"determinant {occ!r} (orbitals {sorted(key)}) not in the "
+                f"openfermion basis — check norb/ne or the file")
+        psi[slot] = coeff
+    psi = psi / np.linalg.norm(psi)
+
+    # ── validate the reconstruction: singlet, so <S^2> ~ 0 ──────────────────
+    from openfermion.hamiltonians import s_squared_operator
+    S2_op = get_number_preserving_sparse_operator(
+        s_squared_operator(norb), n_so, ne, spin_preserving=spin_preserving)
+    s2 = float(np.real(np.vdot(psi, S2_op @ psi)))
+
+    if verbose:
+        print(f"  [CI load] {len(data)} determinants, dim={dim}, "
+              f"sum c^2={norm_sq:.6f}, <S^2>={s2:.2e}")
+    if abs(s2) > s2_tol:
+        raise ValueError(
+            f"reconstructed state has <S^2>={s2:.4f} (expected ~0 for a "
+            f"singlet). The external file's determinant-ordering / sign "
+            f"convention does not match openfermion's — aborting.")
+
+    return psi
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Single molecule / single CAS
 # ──────────────────────────────────────────────────────────────────────────────
+
+def _cr_worker(args):
+    """Top-level (picklable) worker for the parallel convex-roof loop: run the
+    convex roof on ONE cluster's RDM and return (sites, result, error)."""
+    rho, sites, method, n_restarts, max_iter, k_max_extra = args
+    try:
+        res = run_convex_roof_on_rdm(
+            rho, sites, method=method, n_restarts=n_restarts,
+            max_iter=max_iter, k_max_extra=k_max_extra, verbose=False)
+        return sites, res, None
+    except Exception as ex:                      # pragma: no cover - defensive
+        return sites, None, f"{type(ex).__name__}: {ex}"
+
 
 def run_molecular_analysis(
     mol_name: str,
@@ -372,9 +587,22 @@ def run_molecular_analysis(
     save_pkl: bool = True,
     verbose: bool = True,
     localize: Optional[str] = None,
+    psi_external: Optional[np.ndarray] = None,
+    external_tag: str = "extCI",
+    psi_source: Optional[str] = None,
+    n_workers: int = 1,
+    resume: bool = True,
 ) -> dict:
     """
     Full molecular pipeline for ONE molecule + ONE CAS active space.
+
+    psi_external : if given, skip the Hamiltonian build + diagonalisation and
+                   use this state vector directly (e.g. an external CI
+                   wavefunction loaded by ``load_ci_wavefunction``). Everything
+                   downstream — RDMs, convex roof, PDFs, PKLs — is identical;
+                   only the energies are unknown (NaN). Output is tagged
+                   ``_<external_tag>`` so it never collides with diagonalised
+                   runs.
 
     localize : None (canonical orbitals) or 'boys'/'pm'/'ibo' to compute the
                RDMs/GME in a LOCALIZED active-orbital basis (same ground-state
@@ -407,6 +635,8 @@ def run_molecular_analysis(
     cas_tag = f"CAS{cas['nele_cas']}{cas['norb_cas']}"
     if localize:
         cas_tag += f"_loc{localize}"
+    if psi_external is not None:
+        cas_tag += f"_{external_tag}"
 
     if verbose:
         print(f"\n  {'─' * 60}")
@@ -415,26 +645,39 @@ def run_molecular_analysis(
               + (f"   [{localize}-localized orbitals]" if localize else ""))
         print(f"  {'─' * 60}")
 
-    # ── 1. Hamiltonian ──────────────────────────────────────────────────────
-    if localize:
-        from .molecular_localize import build_localized_molecular_hamiltonian
-        _li = build_localized_molecular_hamiltonian(
-            mol_data, cas, basis=basis, method=localize)
-        H_sparse = _li["H_sparse"]; hf_energy = _li["hf_energy"]
-        n_so = _li["n_so"]; ne = _li["ne"]; norb_cas = _li["norb"]
-        hilbert_dim = H_sparse.shape[0]
+    if psi_external is not None:
+        # ── 1-2. External wavefunction: skip Hamiltonian build + diagonalise ─
+        # Use the supplied state vector directly. Only the energies are unknown
+        # (NaN); norb/ne come from the (synthetic) cas, and everything below is
+        # identical to the diagonalised path.
+        psi0 = np.asarray(psi_external)
+        norb_cas = cas["norb_cas"]; ne = cas["nele_cas"]; n_so = 2 * norb_cas
+        hilbert_dim = int(psi0.shape[0])
+        hf_energy = E0 = E1 = float("nan")
+        if verbose:
+            print(f"  external psi supplied (dim={hilbert_dim}) — "
+                  f"skipping Hamiltonian build/diagonalisation")
     else:
-        H_sparse, hf_energy, n_so, ne, norb_cas, hilbert_dim = \
-            build_molecular_hamiltonian(mol_data, cas, basis=basis)
+        # ── 1. Hamiltonian ──────────────────────────────────────────────────
+        if localize:
+            from .molecular_localize import build_localized_molecular_hamiltonian
+            _li = build_localized_molecular_hamiltonian(
+                mol_data, cas, basis=basis, method=localize)
+            H_sparse = _li["H_sparse"]; hf_energy = _li["hf_energy"]
+            n_so = _li["n_so"]; ne = _li["ne"]; norb_cas = _li["norb"]
+            hilbert_dim = H_sparse.shape[0]
+        else:
+            H_sparse, hf_energy, n_so, ne, norb_cas, hilbert_dim = \
+                build_molecular_hamiltonian(mol_data, cas, basis=basis)
 
-    if verbose:
-        print(f"  HF energy   = {hf_energy:.6f} Ha")
-        print(f"  H shape     = {H_sparse.shape}")
+        if verbose:
+            print(f"  HF energy   = {hf_energy:.6f} Ha")
+            print(f"  H shape     = {H_sparse.shape}")
 
-    # ── 2. Ground state ─────────────────────────────────────────────────────
-    E0, E1, psi0 = compute_molecular_ground_state(H_sparse, k=2)
-    if verbose:
-        print(f"  E0 = {E0:.8f}  E1 = {E1:.8f}  gap = {E1 - E0:.8f}")
+        # ── 2. Ground state ─────────────────────────────────────────────────
+        E0, E1, psi0 = compute_molecular_ground_state(H_sparse, k=2)
+        if verbose:
+            print(f"  E0 = {E0:.8f}  E1 = {E1:.8f}  gap = {E1 - E0:.8f}")
 
     # ── 3. Spin + D ─────────────────────────────────────────────────────────
     try:
@@ -474,29 +717,8 @@ def run_molecular_analysis(
             nk = n_clusters_info[f"n_clusters_{k}"]
             print(f"    {k}-body clusters : {nk}")
 
-    # ── 5. Convex roof on every RDM with body order >= 3 ───────────────────
-    cr_results: Dict = {}
-    if cr_method != "none":
-        targets = [s for s in rdm_dict if len(s) >= 3]
-        if verbose:
-            print(f"\n  Running convex-roof ({cr_method}, "
-                  f"{cr_restarts} restarts) on {len(targets)} RDMs ...")
-        for sites in targets:
-            try:
-                res = run_convex_roof_on_rdm(
-                    rdm_dict[sites], sites,
-                    method=cr_method,
-                    n_restarts=cr_restarts,
-                    max_iter=cr_max_iter,
-                    k_max_extra=cr_k_max_extra,
-                    verbose=verbose,
-                )
-                cr_results[sites] = res
-            except Exception as ex:
-                if verbose:
-                    print(f"    [warn] convex roof failed for {sites}: {ex}")
-
-    # ── 6. mol_info for PDF title pages ─────────────────────────────────────
+    # ── 6. mol_info for PDF title pages (built BEFORE the loop so each cluster
+    #        can be persisted the instant it finishes) ──────────────────────
     mol_info = _build_molecular_info(
         mol_name=mol_name, mol_data=mol_data, cas=cas, basis=basis,
         n_so=n_so, hilbert_dim=hilbert_dim, hf_energy=hf_energy,
@@ -505,59 +727,124 @@ def run_molecular_analysis(
         cr_method=cr_method, cr_restarts=cr_restarts,
     )
     mol_info.update(n_clusters_info)
+    if psi_external is not None:
+        # provenance: record where the external wavefunction came from
+        mol_info["wavefunction_source"] = "external_ci"
+        mol_info["psi_source"] = psi_source or "<unspecified>"
 
-    # ── 6b. Save each GME result to a self-contained PKL (like gme_runs/) ────
-    pkl_paths: List[str] = []
-    if save_pkl and cr_results:
-        for sites, res in cr_results.items():
-            if res is None:
-                continue
-            try:
-                p = _save_molecular_gme_pkl(
-                    mol_name=mol_name, cas_tag=cas_tag, sites=sites,
-                    rho=rdm_dict[sites], cr_result=res, mol_info=mol_info,
-                    metrics_entry=metrics.get(sites, {}),
-                )
-                pkl_paths.append(p)
-            except Exception as ex:
-                if verbose:
-                    print(f"    [warn] PKL save failed for {sites}: {ex}")
-        if verbose and pkl_paths:
-            print(f"\n  Saved {len(pkl_paths)} GME PKL(s) → "
-                  f"{_mol_gme_pkl_dir(mol_name)}/")
-
-    # ── 7. PDFs ─────────────────────────────────────────────────────────────
+    # ── 5-7. Per body order: RDM PDF, then convex roof (RESUME + INCREMENTAL
+    # save), then the GME PDF — so each n is fully persisted the moment it
+    # finishes and a kill / re-run resumes instead of losing work. ──────────
     out_dir = Path(output_dir) / mol_name
     out_dir.mkdir(parents=True, exist_ok=True)
-
+    cr_results: Dict = {}
+    pkl_paths: List[str] = []
     pdf_paths: List[str] = []
+    n_w = max(1, int(n_workers or 1))
+    # solver-settings fingerprint in the PKL name: same settings -> reuse,
+    # different settings -> recompute (matches the Hubbard cache convention)
+    cr_tag = _cr_settings_tag(cr_method, cr_restarts, cr_max_iter, cr_k_max_extra)
 
-    if generate_pdf or generate_rdm_pdf:
-        if verbose:
-            print(f"\n  Generating PDFs → {out_dir}/")
+    def _persist(sites, res):
+        """Save one cluster's PKL immediately (incremental) and record it."""
+        if not (save_pkl and res is not None):
+            return
+        try:
+            pkl_paths.append(_save_molecular_gme_pkl(
+                mol_name=mol_name, cas_tag=cas_tag, sites=sites,
+                rho=rdm_dict[sites], cr_result=res, mol_info=mol_info,
+                metrics_entry=metrics.get(sites, {}), cr_tag=cr_tag))
+        except Exception as ex:
+            if verbose:
+                print(f"    [warn] PKL save failed for {sites}: {ex}")
 
-        for n_body in range(min_n_body, max_n_body + 1):
-            if n_clusters_info[f"n_clusters_{n_body}"] == 0:
-                continue
+    for n_body in range(min_n_body, max_n_body + 1):
+        if n_clusters_info[f"n_clusters_{n_body}"] == 0:
+            continue
 
-            # RDM-only PDF (cheap, no convex roof)
-            if generate_rdm_pdf:
-                rdm_path = out_dir / f"RDM_{n_body}body_{mol_name}_{cas_tag}.pdf"
+        # RDM-only PDF (cheap; no convex roof) for this order
+        if generate_rdm_pdf:
+            rdm_path = out_dir / f"RDM_{n_body}body_{mol_name}_{cas_tag}.pdf"
+            try:
                 generate_molecular_rdm_only_pdf(
-                    rdm_dict, metrics, n_body, str(rdm_path), mol_info,
-                )
+                    rdm_dict, metrics, n_body, str(rdm_path), mol_info)
                 pdf_paths.append(str(rdm_path))
+            except Exception as ex:
+                if verbose:
+                    print(f"    [warn] RDM PDF failed for n={n_body}: {ex}")
 
-            # GME PDF with convex-roof section (only if cr ran and k >= 3)
-            if (generate_pdf and cr_method != "none"
-                    and n_body >= 3
-                    and any(len(s) == n_body for s in cr_results)):
-                gme_path = out_dir / f"GME_{n_body}body_{mol_name}_{cas_tag}.pdf"
+        # Convex roof only for n >= 3
+        if cr_method == "none" or n_body < 3:
+            continue
+
+        targets_n = sorted(s for s in rdm_dict if len(s) == n_body)
+        # RESUME: reload clusters already on disk, run only the rest
+        pending = []
+        for s in targets_n:
+            cached = (_load_mol_gme_result(mol_name, cas_tag, s, cr_tag=cr_tag)
+                      if resume else None)
+            if cached is not None:
+                cr_results[s] = cached
+            else:
+                pending.append(s)
+        if verbose:
+            print(f"\n  n={n_body}: {len(targets_n)} clusters "
+                  f"({len(targets_n) - len(pending)} cached, "
+                  f"{len(pending)} to run)  [{n_w} worker(s)]")
+
+        if pending:
+            if n_w > 1 and len(pending) > 1:
+                import multiprocessing as mp
+                jobs = [(rdm_dict[s], s, cr_method, cr_restarts, cr_max_iter,
+                         cr_k_max_extra) for s in pending]
+                with mp.Pool(processes=n_w) as pool:
+                    for sites, res, err in pool.imap_unordered(_cr_worker, jobs):
+                        if err is not None:
+                            if verbose:
+                                print(f"    [warn] convex roof failed for "
+                                      f"{sites}: {err}")
+                            continue
+                        cr_results[sites] = res
+                        _persist(sites, res)          # incremental save
+                        if verbose and res is not None:
+                            print(f"    sites={sites}  "
+                                  f"C_gcg={res.get('C_gcg', float('nan')):.6f}  "
+                                  f"status={res.get('status', '?')}")
+            else:
+                for sites in pending:
+                    try:
+                        res = run_convex_roof_on_rdm(
+                            rdm_dict[sites], sites, method=cr_method,
+                            n_restarts=cr_restarts, max_iter=cr_max_iter,
+                            k_max_extra=cr_k_max_extra, verbose=verbose)
+                        cr_results[sites] = res
+                        _persist(sites, res)          # incremental save
+                    except Exception as ex:
+                        if verbose:
+                            print(f"    [warn] convex roof failed for "
+                                  f"{sites}: {ex}")
+
+        # GME PDF for THIS order, now that it is complete
+        if generate_pdf and any(len(s) == n_body for s in cr_results):
+            gme_path = out_dir / f"GME_{n_body}body_{mol_name}_{cas_tag}.pdf"
+            try:
                 generate_molecular_gme_pdf(
                     rdm_dict, metrics, n_body, str(gme_path), mol_info,
-                    cr_results=cr_results,
-                )
+                    cr_results=cr_results)
                 pdf_paths.append(str(gme_path))
+                if verbose:
+                    print(f"    n={n_body} complete → {gme_path.name}")
+            except Exception as ex:
+                if verbose:
+                    print(f"    [warn] GME PDF failed for n={n_body}: {ex}")
+
+    if verbose and pkl_paths:
+        print(f"\n  Saved {len(pkl_paths)} GME PKL(s) → "
+              f"{_mol_gme_pkl_dir(mol_name)}/")
+
+    # symmetry-class summary: mean C_gcg per order + per gap-class spread
+    if verbose:
+        _cluster_gme_summary(cr_results, norb_cas)
 
     return {
         "mol_info":   mol_info,

@@ -121,8 +121,8 @@ def _write_molecular_title_page(pdf, mol_info: dict, n_body: int) -> None:
         f"Methods run    : {cr_methods}\n"
         f"Restarts       : {mol_info.get('cr_restarts', '?')}\n"
         f"\nC_LB  : coherence witness bound\n"
-        f"C_expo: unitary opt (exp map)\n"
-        f"C_stf : Stiefel manifold (Alg. B)\n"
+        f"C_gcg: Conjugate Gradient(Alg. A)\n"
+        # f"C_stf : Stiefel manifold (Alg. B)\n"
         f"C_UB  : eigendecomposition bound",
         "#0891b2",
     )

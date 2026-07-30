@@ -32,10 +32,17 @@ python main_mol.py --mol NH2- --auto-cas --thermal --T-max 0.3 --T-steps 16
 # 4) One molecule, explicit CAS index, fast solver, no PDFs
 python main_mol.py --mol Methylene --cas 3 --cr-max-iter 60 --cr-kmax 1 --no-pdf
 
-# 5) Audit everything that has been saved
+# 5) GME from an EXTERNAL CI wavefunction (Slater-determinant file, already
+#    localized) instead of building/diagonalising a Hamiltonian. Reconstructs
+#    psi (validated by <S^2>~0) and runs the standard RDM + convex-roof path.
+python main_mol.py --mol Benzene \
+     --ci-file src/hubbard_gme/benzene_full_evec.dat --ci-norb 6 \
+     --max-n 6 --cr-restarts 20
+
+# 6) Audit everything that has been saved
 python main_mol.py --audit
 
-# 6) Render every PDF from the saved PKLs (RDM heatmaps + GME pages + thermal)
+# 7) Render every PDF from the saved PKLs (RDM heatmaps + GME pages + thermal)
 python main_mol.py --render-pdfs
 
 NOTE  Large molecules (nucleobases, PAHs) may exceed workstation memory in the
@@ -45,6 +52,16 @@ NOTE  Large molecules (nucleobases, PAHs) may exceed workstation memory in the
 import argparse
 import os
 import sys
+
+# ── BLAS thread pinning ───────────────────────────────────────────────────────
+# With --workers>1 the convex-roof clusters run in separate processes; each
+# re-imports NumPy/SciPy and would otherwise spawn N BLAS threads, giving M*N
+# threads competing for cores. Pin each worker to one BLAS thread. MUST be set
+# before numpy is imported.
+os.environ.setdefault("OMP_NUM_THREADS",      "1")
+os.environ.setdefault("MKL_NUM_THREADS",      "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS",  "1")
 
 import numpy as np
 
@@ -99,6 +116,28 @@ def build_parser() -> argparse.ArgumentParser:
                         "(dim<=150) per molecule.")
     s.add_argument("--basis", type=str, default="cc-pVDZ", metavar="NAME",
                    help="Basis set (default: cc-pVDZ).")
+    s.add_argument("--ci-file", type=str, default=None, metavar="PATH",
+                   dest="ci_file",
+                   help="Compute GME from an EXTERNAL CI wavefunction "
+                        "(Slater-determinant file, one 'idx coeff occ-string' "
+                        "row per determinant) instead of building/diagonalising "
+                        "a Hamiltonian. Reconstructs psi in the already-localised "
+                        "basis (fixes approximate localisation). Use with --mol "
+                        "NAME; set --ci-norb (default 6). Validated by <S^2>~0.")
+    s.add_argument("--ci-norb", type=int, default=6, dest="ci_norb",
+                   metavar="INT",
+                   help="With --ci-file: number of spatial orbitals in the file "
+                        "(default: 6, benzene pi system). Electrons = norb "
+                        "(half filling).")
+    
+    s.add_argument("--ci-tag", type=str,default="extCI", dest="ci_tag",
+                   metavar="STR",
+                    help="With --ci-file: tag for the external CI wavefunction "
+                        "(default: extCI; used in PKL/PDF names). Use a distinct value "
+                        "(e.g. extCI_excited) to keep excited-state results from "
+                        "colliding with the ground-state ones."
+                    )
+    
     s.add_argument("--localize", choices=["boys", "pm", "ibo", "canonical"],
                    default=None,
                    help="Orbital basis for RDMs/GME (pyscf.lo: boys/pm/ibo, or "
@@ -108,6 +147,18 @@ def build_parser() -> argparse.ArgumentParser:
                         "modes (--thermal/--excited-singlet/--thermal-surface) "
                         "default to PM per the supervisor convention; pass "
                         "'canonical' to opt out.")
+    s.add_argument("--workers", type=int, default=1, dest="workers",
+                   metavar="INT",
+                   help="Parallel worker processes for the convex-roof loop "
+                        "(each cluster is independent). Default: 1 (serial). "
+                        "Use e.g. --workers 8; BLAS is pinned to 1 thread/worker.")
+    s.add_argument("--recompute", action="store_true", dest="recompute",
+                   help="Recompute every cluster even if a saved GME PKL exists. "
+                        "By DEFAULT the pipeline REUSES existing results for the "
+                        "same solver settings (only missing clusters are "
+                        "computed); the settings are in the PKL name, so changing "
+                        "--cr-restarts/--cr-kmax/--cr-max-iter recomputes on its "
+                        "own. Pass --recompute to force a fresh run regardless.")
     s.add_argument("--max-n", type=int, default=3, dest="max_n", metavar="INT",
                    help="Max n-body RDM order (default: 3).")
     s.add_argument("--min-n", type=int, default=1, dest="min_n", metavar="INT",
@@ -197,6 +248,39 @@ def main() -> None:
         print("T=0 GME bar charts:"); R.render_t0()
         print("Thermal GME curves:"); R.render_thermal()
         print("done."); return
+
+    # ── External CI wavefunction mode (no Hamiltonian build/diagonalisation) ─
+    # Reconstruct psi from a Slater-determinant file already in the localised
+    # basis, then hand it to the SAME run_molecular_analysis (RDMs, convex roof,
+    # PDFs, PKLs — nothing duplicated). Fires before molecule resolution — the
+    # molecule need not be in the built-in set, since --mol is only a label.
+    if args.ci_file:
+        from hubbard_gme.molecular_pipeline import load_ci_wavefunction
+        name = args.mol or "Molecule"
+        norb = args.ci_norb
+        try:
+            psi = load_ci_wavefunction(args.ci_file, norb=norb,
+                                       verbose=not args.quiet)
+            # synthetic CAS/molecule metadata (only labels + norb/ne are used)
+            cas = {"nele_cas": norb, "norb_cas": norb, "ncore": 0}
+            mol_data = {"formula": name, "multiplicity": 1, "charge": 0,
+                        "total_electrons": norb}
+            run_molecular_analysis(
+                mol_name=name, mol_data=mol_data, cas=cas, basis="external-CI",
+                max_n_body=args.max_n, min_n_body=args.min_n,
+                output_dir=args.output_dir, cr_method=args.cr_method,
+                cr_restarts=args.cr_restarts, cr_max_iter=args.cr_max_iter,
+                cr_k_max_extra=args.cr_kmax,
+                generate_pdf=not args.no_pdf,
+                generate_rdm_pdf=(not args.no_pdf) and (not args.no_rdm_pdf),
+                save_pkl=args.save_pkl, verbose=not args.quiet,
+                psi_external=psi, psi_source=args.ci_file, external_tag=args.ci_tag,
+                n_workers=args.workers, resume=not args.recompute,
+            )
+        except Exception as ex:
+            print(f"  [ERROR ci-file] {name}: {ex}")
+            sys.exit(1)
+        return
 
     # ── Resolve molecule set ─────────────────────────────────────────────────
     MOLS = load_molecules(args.molecules_py) if args.molecules_py else DEFAULT_MOLECULES
@@ -293,7 +377,7 @@ def main() -> None:
                     generate_pdf=not args.no_pdf,
                     generate_rdm_pdf=(not args.no_pdf) and (not args.no_rdm_pdf),
                     save_pkl=args.save_pkl, verbose=not args.quiet,
-                    localize=loc,
+                    localize=loc, n_workers=args.workers, resume=not args.recompute,
                 )
             except Exception as ex:
                 print(f"  [ERROR] {name}: {ex}")

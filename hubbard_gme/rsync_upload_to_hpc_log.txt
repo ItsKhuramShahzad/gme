@@ -1,0 +1,14 @@
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+Loading slurm
+  Loading requirement: nvidia/cuda-12.0.0 gcc-8.5.0/hwloc-2.9.1
+    gcc-8.5.0/pmix-4.2.2 gcc-8.5.0/ucx-1.14.1
+sending incremental file list
+rsync_upload_to_hpc_log.txt
+            376 100%    0.00kB/s    0:00:00              376 100%    0.00kB/s    0:00:00 (xfr#1, to-chk=1004/1030)
+src/hubbard_gme/thermal_pipeline.py
+            700   0%    2.76kB/s    0:00:53          148.09K 100%  583.15kB/s    0:00:00 (xfr#2, to-chk=158/1030)
+
+sent 52.72K bytes  received 1.42K bytes  4.01K bytes/sec
+total size is 1.34G  speedup is 24,794.44

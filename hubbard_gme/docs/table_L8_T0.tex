@@ -1,0 +1,23 @@
+\begin{table}[h]\centering
+\caption{Ground-state ($T=0$) cluster properties (from stored RDMs).}
+\begin{tabular}{@{}ccccccc@{}}\toprule
+$n$ & $2^n$ & Purity & Entropy & $\langle S^2\rangle$ & Rank & $C_{\mathrm{GME}}$ \\
+\midrule
+2 & 4 & 0.5277 & 1.3389 & 0.5873 & 4 & 0.4127 \\
+3 & 8 & 0.4282 & 1.4770 & 0.8160 & 8 & 0.2812 \\
+4 & 16 & 0.4785 & 1.5167 & 0.6670 & 16 & 0.4294 \\
+5 & 32 & 0.4282 & 1.4771 & 0.8160 & 22 & 0.4239 \\
+6 & 64 & 0.5277 & 1.3391 & 0.5873 & 15 & 0.6390 \\
+7 & 128 & 0.5000 & 1.0007 & 0.7500 & 8 & 0.7882 \\
+8 & 256 & 1.0000 & 0.0000 & 0.0000 & 1 & 0.9719 \\
+\bottomrule\end{tabular}
+\\[4pt]
+\small
+\begin{tabular}{@{}lc@{}}\toprule
+\multicolumn{2}{@{}l}{$n=2$ (bipartite) cross-check} \\
+\midrule
+Convex roof (GCG) & 0.412667 \\
+Wootters concurrence $C$ & 0.412667 \\
+Werner $\sqrt{1-\sqrt{1-C^2}}$ & 0.298526 \\
+\bottomrule\end{tabular}
+\end{table}

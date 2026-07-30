@@ -60,8 +60,9 @@ Three public entry points wired into `main.py`:
 ```text
 run_thermal_gme_analysis(L, t, U, T_values, ...)   -> --thermal
 run_excited_singlet_gme(L, t, U, ...)              -> --excited-singlet [--T-sweep]
-run_t_dependence_gme(L, t_values, U, ...)          -> --t-scan
-run_U_dependence_gme(L, U_values, t, ...)          -> --u-scan
+run_t_dependence_gme(L, t_values, U, V, ...)       -> --t-scan
+run_U_dependence_gme(L, U_values, t, V, ...)       -> --u-scan
+run_V_dependence_gme(L, V_values, t, U, ...)       -> --v-scan   (extended Hubbard)
 find_first_excited_singlet(...)                    -> spin classification helper
 ```
 
@@ -77,6 +78,28 @@ Task 1  L6_*_task1_thermal_GME_L6_t1.0_U10.0_T0to5_N40_*.pdf
 Task 2  L6_singlet_*_task2_excited_singlet_GME_*_T0_*.pdf  (+ ..._thermal_*_T0.01to5_N30_*.pdf)
 Task 3  L6_tscan_*_task3_tscan_GME_L6_U10.0_t0.05to2_N20_*.pdf
 ```
+
+### 3.1b Extended Hubbard V (nearest-neighbour interaction)  (DONE 2026-07-29)
+
+Added `V Σ_j n_j n_{j+1}` (n_j = n_{j↑}+n_{j↓}, PBC ring) to
+`build_hubbard_hamiltonian`, threaded `V` (keyword, default 0.0) through
+`compute_all_eigenstates` / `compute_k_eigenstates` /
+`compute_ground_and_excited_states`, both scans, and `main.py --V`. `V=0`
+reproduces the plain Hubbard model exactly (regression checked). Validated:
+E0 shifts with V; a U-scan at V=5 changes C_GME on every cluster.
+
+New V-scan (fix t and U, sweep V) — shows the Mott→CDW transition at V ~ U/2:
+
+```text
+run_V_dependence_gme(L, V_values, t, U, ...)  -> --v-scan  (+ --v-scan-min/max/steps)
+plot_scan_finalized                            -> V/t x-axis branch; fixed V shown in
+                                                  t-/U-scan titles when V != 0
+```
+
+Saved everywhere: V is in each scan PKL (`system_info` + the cache filename, so
+V/t = 5, 10, 20 runs never collide) and in the auto-produced PDF title. Test
+(L=6, U=10, V 0→12): C_GME(n<6) collapses between V=4 and V=8, i.e. across
+V ≈ U/2 = 5 — the CDW transition, captured as a single curve.
 
 ### 3.2 Per-method GME solver control
 

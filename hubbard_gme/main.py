@@ -51,6 +51,23 @@ python main.py --L 6 --U 4.0 --use-pkl-cache --force-gme-recompute \
 # Thermal nBRDM analysis with terminal parameters and PKL reuse.
 python main.py --thermal --L 4 --U 4.0 --T-max 2 --T-steps 11 \
                --thermal-solver supervisor --use-pkl-cache
+
+# Extended Hubbard: on-site U + nearest-neighbour V (V Σ_j n_j n_{j+1}).
+# Single point with V (V=0 reproduces the plain Hubbard model exactly):
+python main.py --L 6 --U 4.0 --V 5.0
+
+# U-scan at a FIXED V (supervisor plot: C_GME vs U/t at V/t = 5, 10, 20).
+# Run once per V; each auto-saves a PKL (V is in the filename) + a PDF.
+python main.py --L 6 --Ne 6 --t 1.0 --u-scan \
+               --u-scan-min 0 --u-scan-max 15 --u-scan-steps 16 \
+               --V 5 --full-hamiltonian --n-restarts 8 --k-max-extra 4 \
+               --use-pkl-cache --output-prefix V5
+
+# V-scan: FIX t and U, sweep V — shows the Mott -> CDW transition at V ~ U/2.
+python main.py --L 6 --Ne 6 --t 1.0 --U 10 --v-scan \
+               --v-scan-min 0 --v-scan-max 15 --v-scan-steps 16 \
+               --full-hamiltonian --n-restarts 8 --k-max-extra 4 \
+               --use-pkl-cache --output-prefix Vscan_U10
 """
 
 import argparse
@@ -79,10 +96,12 @@ from hubbard_gme.thermal_pipeline import (
     run_excited_singlet_gme,
     run_t_dependence_gme,
     run_U_dependence_gme,
+    run_V_dependence_gme,
     run_tT_surface_gme,
     render_surface_from_pkl,
     merge_tT_surface_pkls,
     build_or_load_rdm_bank,
+    plot_scan_finalized,
 )
 
 
@@ -102,6 +121,8 @@ def build_parser() -> argparse.ArgumentParser:
                          metavar="FLOAT", help="Primary hopping amplitude (default: 1.0)")
     sys_grp.add_argument("--U",    type=float, default=4.0,
                          metavar="FLOAT", help="On-site repulsion (default: 4.0)")
+    sys_grp.add_argument("--V", type=float, default=0.0, 
+                         metavar="FLOAT", help="Nearest-neighbor repulsion (default: 0.0)")
     sys_grp.add_argument("--mode", type=str,   default="uniform",
                          choices=list(VALID_MODES),
                          help="Topology (default: uniform)")
@@ -295,6 +316,15 @@ def build_parser() -> argparse.ArgumentParser:
                            help="Re-render the 3D surface + 2D heatmap from a "
                                 "cached tTsurface_*.pkl (no recompute). Output "
                                 "goes to --output-dir (default: outputs/).")
+    therm_grp.add_argument("--replot", type=str, nargs="+", default=None,
+                           dest="replot", metavar="PKL",
+                           help="Regenerate t-scan / U-scan figures from cached "
+                                "scan PKLs (no recompute). Uses the same "
+                                "plot_scan_finalized() the scans call, so a "
+                                "replot always matches a fresh scan. Accepts "
+                                "paths and globs; pass 'all' for every t-scan "
+                                "and U-scan PKL under results/.../thermal_runs. "
+                                "Output goes to --output-dir/replots.")
     therm_grp.add_argument("--merge-surface", type=str, nargs="+", default=None,
                            dest="merge_surface", metavar="PKL",
                            help="Merge several per-n surface PKLs (each from a "
@@ -327,6 +357,51 @@ def build_parser() -> argparse.ArgumentParser:
                                 "are ~18GB each (all eigenstates x 128x128/256x256 "
                                 "RDMs) — use e.g. --bank-max-n 4 for L>=7 to avoid "
                                 "filling disk. Does not affect existing L<=6 caches.")
+    # Optional grid sweep: --build-bank normally builds the single point given
+    # by --L/--Ne/--t/--U. Supplying any of the lists below turns it into a
+    # cartesian sweep, so widening the ML dataset needs no separate script.
+    therm_grp.add_argument("--bank-L", nargs="+", type=int, default=None,
+                           dest="bank_L", metavar="INT",
+                           help="With --build-bank: sweep these ring sizes "
+                                "instead of the single --L.")
+    therm_grp.add_argument("--bank-U", nargs="+", type=float, default=None,
+                           dest="bank_U", metavar="FLOAT",
+                           help="With --build-bank: sweep these U values "
+                                "instead of the single --U.")
+    therm_grp.add_argument("--bank-t", nargs="+", type=float, default=None,
+                           dest="bank_t", metavar="FLOAT",
+                           help="With --build-bank: sweep these hoppings "
+                                "instead of the single --t.")
+    therm_grp.add_argument("--bank-Ne", nargs="+", type=int, default=None,
+                           dest="bank_Ne", metavar="INT",
+                           help="With --build-bank: sweep these fillings "
+                                "(default: --Ne, else half filling Ne=L).")
+    therm_grp.add_argument("--bank-sectors", default=None,
+                           choices=["sz0", "full", "both"], dest="bank_sectors",
+                           help="With --build-bank: which S_z sector(s) to build "
+                                "(default: follows --full-hamiltonian).")
+    therm_grp.add_argument("--bank-dry-run", action="store_true",
+                           dest="bank_dry_run",
+                           help="With --build-bank: print the grid and the record "
+                                "yield, build nothing.")
+    # --- chain straight into GCG labelling so one command stores everything ---
+    therm_grp.add_argument("--bank-label", action="store_true",
+                           dest="bank_label",
+                           help="With --build-bank: after building, run the GCG "
+                                "convex roof on every bank RDM and store the "
+                                "labels (C_GME, Wootters for n=2), the full "
+                                "convergence history and the RDM metrics into "
+                                "the reserved ML store. Resumable: anything "
+                                "already labelled is skipped, never recomputed.")
+    therm_grp.add_argument("--bank-label-T", nargs="+", type=float,
+                           default=[0.0], dest="bank_label_T", metavar="FLOAT",
+                           help="With --bank-label: temperatures to label from "
+                                "each bank (default: 0.0 = ground state only).")
+    therm_grp.add_argument("--bank-label-outdir", default=None,
+                           dest="bank_label_outdir", metavar="DIR",
+                           help="With --bank-label: dataset root "
+                                "(default: <repo>/gme_qml/data_for_ML_v2). "
+                                "Relative paths are anchored to the repo.")
 
     # ── U-dependence scan (T=0, vary U) ───────────────────────────────────
     therm_grp.add_argument("--u-scan", action="store_true", dest="u_scan",
@@ -341,10 +416,27 @@ def build_parser() -> argparse.ArgumentParser:
     therm_grp.add_argument("--u-scan-steps", type=int, default=20,
                            dest="u_scan_steps", metavar="INT",
                            help="U-scan steps (default: 20)")
+    therm_grp.add_argument("--v-scan", action="store_true", dest="v_scan",
+                           help="Scan C_GME(n) vs V at T=0, fixing t and U "
+                                "(extended-Hubbard V-scan; shows the CDW "
+                                "transition). Use --v-scan-min/max/steps and "
+                                "--U to set the fixed U.")
+    therm_grp.add_argument("--v-scan-min", type=float, default=0.0,
+                           dest="v_scan_min", metavar="FLOAT",
+                           help="V-scan start (default: 0.0)")
+    therm_grp.add_argument("--v-scan-max", type=float, default=15.0,
+                           dest="v_scan_max", metavar="FLOAT",
+                           help="V-scan end   (default: 15.0)")
+    therm_grp.add_argument("--v-scan-steps", type=int, default=16,
+                           dest="v_scan_steps", metavar="INT",
+                           help="V-scan steps (default: 16)")
     therm_grp.add_argument("--full-hamiltonian", action="store_true",
                            dest="full_hamiltonian",
                            help="Use complete Hamiltonian (all Sz sectors). "
                                 "Default: Sz=0 sector only (spin_preserving=True).")
+    therm_grp.add_argument("--T-view-max", type=float, default=None, dest="T_view_max",
+                       help="Cap the thermal-plot x-axis at this T (view only; "
+                            "does not change the data). Default: auto-clip.")
 
     # ── PKL persistence / reuse ──────────────────────────────────────────────
     cache_grp = p.add_argument_group("PKL persistence and reuse")
@@ -557,6 +649,67 @@ def main():
         print(f"  CSV → {csv_path}\n")
         return
 
+    # ── Re-plot t-scan / U-scan figures from cached PKLs (no recompute) ─────
+    if args.replot:
+        import glob as _glob
+        import pickle as _pickle
+        from hubbard_gme.rdm import get_rdm_pkl_results_dir
+
+        thermal_dir = get_rdm_pkl_results_dir() / "thermal_runs"
+        files: list = []
+        for spec in args.replot:
+            if spec == "all":
+                for pat in ("tscan*.pkl", "uscan*.pkl"):
+                    files += sorted(str(p) for p in thermal_dir.glob(pat))
+            else:
+                hits = sorted(_glob.glob(spec))
+                if not hits and not os.path.isabs(spec):
+                    # bare filename or glob: look inside the reserved dir
+                    hits = sorted(str(p) for p in thermal_dir.glob(spec))
+                if not hits:
+                    # Report a miss as a miss. Passing the pattern through as a
+                    # literal path only produces a confusing FileNotFoundError.
+                    print(f"  [no match] {spec}")
+                    continue
+                files += hits
+        # de-duplicate, preserve order
+        files = list(dict.fromkeys(files))
+        if not files:
+            avail = sorted(p.name for p in thermal_dir.glob("[tu]scan*.pkl"))
+            msg = (f"--replot: no matching scan PKLs.\n"
+                   f"  looked in: {thermal_dir}\n"
+                   f"  note: --output-prefix names the FIGURE, not the PKL; the\n"
+                   f"        PKL is named from parameters. Excited-singlet runs\n"
+                   f"        carry an '_es_' tag, e.g. 'uscan*_es_*.pkl'.\n"
+                   f"  {len(avail)} scan PKL(s) available; first few:")
+            for a in avail[:6]:
+                msg += f"\n    {a}"
+            parser.error(msg)
+
+        outdir = os.path.join(args.output_dir, "replots")
+        os.makedirs(outdir, exist_ok=True)
+        ok = fail = 0
+        for pkl_path in files:
+            try:
+                with open(pkl_path, "rb") as fh:
+                    d = _pickle.load(fh)
+                r = d.get("result", d)
+                base = os.path.splitext(os.path.basename(pkl_path))[0]
+                out = os.path.join(outdir, f"REPLOT_{base}.pdf")
+                # sector is encoded in the filename: '..._sz0_...' vs '..._full_...'
+                plot_scan_finalized(r, out,
+                                    spin_preserving="sz0" in os.path.basename(pkl_path),
+                                    save_png=True)
+                kind = "t-scan" if "t_values" in r else "U-scan"
+                print(f"  {kind}  n={sorted(r['C_GME'])} → {os.path.basename(out)}")
+                ok += 1
+            except Exception as e:
+                print(f"  [skip] {os.path.basename(pkl_path)}: "
+                      f"{type(e).__name__}: {e}")
+                fail += 1
+        print(f"\n  regenerated {ok} figures ({fail} skipped) → {outdir}/\n")
+        return
+
     # ── Re-render surface + heatmap from a cached PKL (no recompute) ────────
     if args.render_surface:
         if not os.path.exists(args.render_surface):
@@ -581,28 +734,154 @@ def main():
 
     # ── Standalone RDM-bank build mode ─────────────────────────────────────
     if args.build_bank:
-        n_min_bank = max(2, args.min_n)
-        if n_min_bank > args.L:
-            parser.error("--min-n cannot exceed --L for --build-bank")
-        info = build_or_load_rdm_bank(
-            L=args.L, t=args.t, U=args.U, mode=args.mode,
-            n_electrons=args.Ne, n_min=n_min_bank,
-            t_prime=args.t_prime, t2=args.t2, t_perp=args.t_perp,
-            average_site_clusters=args.thermal_average_site_clusters,
-            n_workers=args.n_workers,
-            spin_preserving=not args.full_hamiltonian,
-            use_pkl_cache=True,
-            cache_version=args.cache_version,
-            force_recompute=args.force_state_recompute or args.force_rdm_recompute,
-            save_pkl=True,
-            verbose=True,
-            n_max=args.bank_max_n,
-        )
-        status = "loaded from cache" if info["loaded_from_cache"] else "built + saved"
-        print(f"\n  RDM bank {status}")
-        print(f"  n range     : {info['n_values'][0]}..{info['n_values'][-1]}")
-        print(f"  eigenstates : {len(info['energies'])}")
-        print(f"  bank PKL    : {info['cache_path']}")
+        import time as _time
+
+        # A sweep is requested if ANY of the --bank-{L,U,t,Ne,sectors} lists is
+        # given; otherwise fall back to the single point from --L/--U/--t/--Ne
+        # so existing commands behave exactly as before.
+        sweeping = any(x is not None for x in
+                       (args.bank_L, args.bank_U, args.bank_t,
+                        args.bank_Ne, args.bank_sectors))
+        L_vals = args.bank_L if args.bank_L is not None else [args.L]
+        U_vals = args.bank_U if args.bank_U is not None else [args.U]
+        t_vals = args.bank_t if args.bank_t is not None else [args.t]
+        sec = args.bank_sectors or ("full" if args.full_hamiltonian else "sz0")
+        sectors = {"sz0": [True], "full": [False], "both": [True, False]}[sec]
+
+        jobs = []
+        for L in L_vals:
+            if args.bank_Ne is not None:
+                fillings = args.bank_Ne
+            else:
+                fillings = [args.Ne if args.Ne is not None else L]
+            for Ne in fillings:
+                if not 0 < Ne <= 2 * L:
+                    print(f"  [skip] L={L} Ne={Ne}: filling outside 0 < Ne <= 2L")
+                    continue
+                if max(2, args.min_n) > L:
+                    print(f"  [skip] L={L}: --min-n {args.min_n} exceeds L")
+                    continue
+                for U in U_vals:
+                    for t in t_vals:
+                        for sp in sectors:
+                            if sp and Ne % 2:
+                                continue      # odd Ne has no S_z=0 sector
+                            jobs.append((L, Ne, float(U), float(t), sp))
+        if not jobs:
+            parser.error("--build-bank: the requested grid is empty")
+
+        if sweeping:
+            n_per = {L: max(0, (min(args.bank_max_n or L, L) - max(2, args.min_n) + 1))
+                     for L in L_vals}
+            print(f"\n  bank grid   : {len(L_vals)} L x {len(U_vals)} U x "
+                  f"{len(t_vals)} t x {len(sectors)} sector(s), mode={args.mode}")
+            print(f"  banks to do : {len(jobs)}")
+            print(f"  records/T   : {sum(n_per[L] for L, *_ in jobs)}"
+                  f"   (x number of --bank-T values at ingestion)")
+            if args.bank_dry_run:
+                for L, Ne, U, t, sp in jobs:
+                    print(f"    L={L} Ne={Ne} U={U} t={t} "
+                          f"{'sz0' if sp else 'full'}")
+                print()
+                return
+
+        t0 = _time.time()
+        built = failed = 0
+        built_paths: list = []          # exactly the banks this run touched
+        for i, (L, Ne, U, t, sp) in enumerate(jobs, 1):
+            if sweeping:
+                print(f"\n[{_time.strftime('%H:%M:%S')}] ({i}/{len(jobs)}) "
+                      f"L={L} Ne={Ne} U={U} t={t} "
+                      f"{'sz0' if sp else 'full'} mode={args.mode}", flush=True)
+            try:
+                info = build_or_load_rdm_bank(
+                    L=L, t=t, U=U, mode=args.mode,
+                    n_electrons=Ne, n_min=max(2, args.min_n),
+                    t_prime=args.t_prime, t2=args.t2, t_perp=args.t_perp,
+                    average_site_clusters=args.thermal_average_site_clusters,
+                    n_workers=args.n_workers,
+                    spin_preserving=sp,
+                    use_pkl_cache=True,
+                    cache_version=args.cache_version,
+                    force_recompute=(args.force_state_recompute
+                                     or args.force_rdm_recompute),
+                    save_pkl=True,
+                    verbose=not sweeping,
+                    n_max=args.bank_max_n,
+                )
+            except Exception as e:                  # keep a long sweep alive
+                failed += 1
+                print(f"    [FAIL] {type(e).__name__}: {e}", flush=True)
+                continue
+            built += 1
+            built_paths.append(info["cache_path"])
+            status = ("loaded from cache" if info["loaded_from_cache"]
+                      else "built + saved")
+            if sweeping:
+                print(f"    {status}  ({built} ok, {failed} failed, "
+                      f"{(_time.time()-t0)/60:.1f} min)", flush=True)
+            else:
+                print(f"\n  RDM bank {status}")
+                print(f"  n range     : {info['n_values'][0]}..{info['n_values'][-1]}")
+                print(f"  eigenstates : {len(info['energies'])}")
+                print(f"  bank PKL    : {info['cache_path']}")
+        if sweeping:
+            print(f"\n  DONE: {built} banks ({failed} failed) in "
+                  f"{(_time.time()-t0)/60:.1f} min")
+
+        # ── optional stage 2: GCG-label every bank RDM and store everything ──
+        if args.bank_label:
+            from hubbard_gme.rdm import get_project_root, get_rdm_pkl_results_dir
+            _repo = str(get_project_root())
+            _qml = os.path.join(_repo, "gme_qml")
+            if _qml not in sys.path:
+                sys.path.insert(0, _qml)
+            from ml_ingest_pkls import (ingest_banks, _load_done,
+                                        _append_manifest, _anchor)
+
+            ds_root = _anchor(args.bank_label_outdir
+                              or os.path.join(_repo, "gme_qml", "data_for_ML_v2"),
+                              _repo)
+            out_ing = ds_root / "ingested"
+            records_dir = out_ing / "records"
+            records_dir.mkdir(parents=True, exist_ok=True)
+            manifest = out_ing / "manifest.csv"
+            done = _load_done(manifest)
+            n_before = len(done)   # ingest_banks mutates `done` as it goes
+
+            print(f"\n  ── labelling stage ─────────────────────────────────")
+            print(f"  dataset root : {out_ing}")
+            print(f"  already have : {n_before} labelled records (skipped)")
+            print(f"  temperatures : {args.bank_label_T}")
+            # --max-iter/--tol default to None in main.py (the solver picks its
+            # own); ingest_banks needs concrete numbers, so fall back to the
+            # same defaults ml_ingest_pkls.py uses.
+            _max_iter = args.max_iter if args.max_iter is not None else 200
+            _tol = args.tol if args.tol is not None else 1e-9
+            print(f"  solver       : n_restarts={args.n_restarts} "
+                  f"max_iter={_max_iter} tol={_tol} "
+                  f"k_max_extra={args.k_max_extra}")
+            rows = ingest_banks(
+                get_rdm_pkl_results_dir(), records_dir, out_ing, done,
+                T_list=list(args.bank_label_T),
+                cutoff=args.thermal_energy_cutoff,
+                n_restarts=args.n_restarts, max_iter=_max_iter,
+                tol=_tol, k_max_extra=args.k_max_extra, verbose=True,
+                # label exactly the grid this command built, not the whole cache
+                only_banks=built_paths,
+            )
+            _append_manifest(rows, manifest)
+            print(f"\n  labelled {len(rows)} NEW records "
+                  f"(total now {n_before + len(rows)})")
+            print(f"  records   → {records_dir}")
+            print(f"  manifest  → {manifest}")
+            print(f"  convergence sidecars → {out_ing / 'convergence'}")
+        elif sweeping:
+            print("\n  Banks hold RDMs only — no GME labels. To label them, "
+                  "re-run with --bank-label, or:")
+            print("    python gme_qml/ml_ingest_pkls.py --source banks "
+                  "--bank-T 0 0.1 0.25 0.5 1 2 "
+                  "--n-restarts 8 --max-iter 150 --k-max-extra 2")
         print()
         return
 
@@ -653,6 +932,7 @@ def main():
             n_workers=args.n_workers,
             average_site_clusters=args.thermal_average_site_clusters,
             spin_preserving=not args.full_hamiltonian,
+            T_view_max=args.T_view_max
         )
 
         print(f"\n  Thermal plot : {result['plot_path']}")
@@ -663,7 +943,9 @@ def main():
         return
 
     # ── Excited singlet mode ───────────────────────────────────────────────
-    if args.excited_singlet:
+    # Combined with --t-scan / --u-scan, --excited-singlet is a MODIFIER that
+    # tells the scan which state to use, so let the scan handler take over.
+    if args.excited_singlet and not (args.t_scan or args.u_scan or args.v_scan):
         n_min_es = max(2, args.min_n)
         if n_min_es > args.L:
             parser.error("--min-n cannot exceed --L for excited-singlet analysis")
@@ -698,6 +980,7 @@ def main():
             save_pkl=args.save_thermal_pkl,
             n_workers=args.n_workers,
             spin_preserving=not args.full_hamiltonian,
+            T_view_max=args.T_view_max
         )
         print(f"\n  Singlet bar plot : {result['bar_path']}")
         if result.get("pkl_path"):
@@ -720,6 +1003,7 @@ def main():
 
         result = run_t_dependence_gme(
             L=args.L, t_values=t_values, U=args.U,
+            V= args.V,
             mode=args.mode, n_electrons=args.Ne,
             n_min=max(2, args.min_n),
             output_dir=args.output_dir,
@@ -735,6 +1019,10 @@ def main():
             force_recompute=args.force_thermal_recompute,
             save_pkl=args.save_thermal_pkl,
             spin_preserving=not args.full_hamiltonian,
+            # --excited-singlet turns the scan into a first-excited-singlet
+            # scan; the singlet is re-located at every grid point
+            excited_singlet=args.excited_singlet,
+            singlet_k=args.singlet_k,
         )
         print(f"\n  t-scan plot : {result['plot_path']}")
         if result.get("pkl_path"):
@@ -793,14 +1081,14 @@ def main():
     if args.u_scan:
         us_max_iter = 300 if args.max_iter is None else args.max_iter
         us_tol      = 1e-9 if args.tol     is None else args.tol
-        if args.u_scan_min <= 0:
-            parser.error("--u-scan-min must be positive")
+        # Negative U (attractive Hubbard) is physically valid, so it is allowed.
         if args.u_scan_max <= args.u_scan_min:
             parser.error("--u-scan-max must be greater than --u-scan-min")
         U_values = np.linspace(args.u_scan_min, args.u_scan_max, args.u_scan_steps)
 
         result = run_U_dependence_gme(
             L=args.L, U_values=U_values, t=args.t,
+            V= args.V,
             mode=args.mode, n_electrons=args.Ne,
             n_min=max(2, args.min_n),
             output_dir=args.output_dir,
@@ -816,11 +1104,50 @@ def main():
             force_recompute=args.force_thermal_recompute,
             save_pkl=args.save_thermal_pkl,
             spin_preserving=not args.full_hamiltonian,
+            # --excited-singlet turns the scan into a first-excited-singlet
+            # scan; the singlet is re-located at every grid point
+            excited_singlet=args.excited_singlet,
+            singlet_k=args.singlet_k,
         )
         print(f"\n  U-scan plot : {result['plot_path']}")
         if result.get("pkl_path"):
             status = "loaded" if result.get("loaded_from_cache") else "saved"
             print(f"  U-scan PKL  : {result['pkl_path']} ({status})")
+        print()
+        return
+
+    # ── V-dependence scan mode (extended Hubbard: fix t & U, sweep V) ───────
+    if args.v_scan:
+        vs_max_iter = 300 if args.max_iter is None else args.max_iter
+        vs_tol      = 1e-9 if args.tol     is None else args.tol
+        if args.v_scan_max <= args.v_scan_min:
+            parser.error("--v-scan-max must be greater than --v-scan-min")
+        V_values = np.linspace(args.v_scan_min, args.v_scan_max, args.v_scan_steps)
+
+        result = run_V_dependence_gme(
+            L=args.L, V_values=V_values, t=args.t, U=args.U,
+            mode=args.mode, n_electrons=args.Ne,
+            n_min=max(2, args.min_n),
+            output_dir=args.output_dir,
+            output_prefix=args.output_prefix,
+            solver=args.thermal_solver,
+            n_restarts=args.n_restarts,
+            max_iter=vs_max_iter,
+            tol=vs_tol,
+            k_max_extra=args.k_max_extra,
+            verbose=True,
+            use_pkl_cache=args.use_pkl_cache,
+            cache_version=args.cache_version,
+            force_recompute=args.force_thermal_recompute,
+            save_pkl=args.save_thermal_pkl,
+            spin_preserving=not args.full_hamiltonian,
+            excited_singlet=args.excited_singlet,
+            singlet_k=args.singlet_k,
+        )
+        print(f"\n  V-scan plot : {result['plot_path']}")
+        if result.get("pkl_path"):
+            status = "loaded" if result.get("loaded_from_cache") else "saved"
+            print(f"  V-scan PKL  : {result['pkl_path']} ({status})")
         print()
         return
 
