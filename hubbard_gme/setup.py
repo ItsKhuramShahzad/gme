@@ -12,7 +12,7 @@ with open("requirements.txt") as f:
 
 setup(
     name="hubbard_gme",
-    version="0.1.0",
+    version="0.3.0",
     author="Khuram Shahzad",
     description=(
         "Genuine Multipartite Entanglement analysis for the Hubbard model "
