@@ -132,47 +132,67 @@ cd gme/hubbard_gme
 
 ### 2. Requirements
 
-- **Python ≥ 3.9** (developed and tested on **3.11**).
-- **Core modules** (installed automatically by the steps below, see
-  `requirements.txt`):
+- **Python 3.11** (the conda environment pins `python=3.11.5`; `setup.py`
+  allows `>=3.9`).
+- The **complete, authoritative dependency set is `enviornment_qchem.yml`** —
+  it captures the full stack actually used for the project's runs. Prefer it
+  (Install option A) unless you only need the minimal Hubbard pipeline.
 
-  | Module | Purpose |
-  |--------|---------|
-  | `numpy` ≥ 1.24, `scipy` ≥ 1.10 | Linear algebra, eigensolvers, optimisers |
-  | `pandas` ≥ 2.0 | Metric tables / DataFrames |
-  | `matplotlib` ≥ 3.7 | Heatmaps and PDF reports |
-  | `openfermion` ≥ 1.6 | Fermionic operators (Hubbard + molecular Hamiltonians) |
-  | `jupyter`, `ipykernel` | Notebook walkthroughs (optional) |
-  | `pytest`, `pytest-cov` | Test suite |
+Dependencies come in two tiers:
 
-- **Optional extras (not in `requirements.txt`):**
+**a) Minimal core** (`requirements.txt`) — enough for the **Hubbard** pipeline,
+convex-roof solvers, and tests:
+
+| Module | Purpose |
+|--------|---------|
+| `numpy` ≥ 1.24, `scipy` ≥ 1.10 | Linear algebra, eigensolvers, optimisers |
+| `pandas` ≥ 2.0 | Metric tables / DataFrames |
+| `matplotlib` ≥ 3.7 | Heatmaps and PDF reports |
+| `openfermion` ≥ 1.6 | Fermionic operators (Hubbard + molecular Hamiltonians) |
+| `jupyter`, `ipykernel` | Notebook walkthroughs (optional) |
+| `pytest`, `pytest-cov` | Test suite |
+
+**b) Full environment** (`enviornment_qchem.yml`) — the core **plus** everything
+for molecular analysis, reporting, and GPU/quantum work (not in
+`requirements.txt`):
+
+| Module(s) | Enables |
+|-----------|---------|
+| `pyscf`, `openfermionpyscf` | Molecular Hamiltonians / ground states (`main_mol.py`) |
+| `rdkit-pypi`, `pubchempy`, `py3dmol` | Molecule lookup and 3-D / structure visualisation |
+| `h5py` | Reading/writing the large `.hdf5` state files |
+| `tectonic`, `texlive-core` | LaTeX → PDF report compilation (`.tex` outputs) |
+| `cudaq`, `cudaq-solvers`, `cirq-core`, `cuquantum`/`cupy` (CUDA 12) | GPU-accelerated quantum simulation stack |
+| `sympy`, `networkx`, `tqdm`, `tabulate` | Misc. symbolic / graph / progress / table helpers |
+
+**c) Still not included in either file — install manually if needed:**
   - `cvxpy` — only for the SDP lower bound in `convex_roof.py`
     (`convex_roof_sdp_relaxation`). Everything else runs without it.
   - `scikit-learn`, `joblib` — only for the machine-learning subproject
-    (`gme_qml/`, see below).
+    (`gme_qml/`, see "Machine Learning" below).
 
 ### 3. Install
 
-**Recommended — editable install (adds the `hubbard_gme` package to your env):**
-
-```bash
-pip install -e .
-```
-
-**Or install dependencies only** (then run with `PYTHONPATH=src`, see below):
-
-```bash
-pip install -r requirements.txt
-```
-
-**Or reproduce the exact conda environment used for the project's runs (`qchem`):**
+**Option A (recommended) — reproduce the full conda environment from the yml.**
+This is the most complete and reproducible setup (Python 3.11 + the entire
+stack, including molecular and reporting tools):
 
 ```bash
 conda env create -f enviornment_qchem.yml   # or enviornment.yml (general)
 conda activate qchem
+pip install -e .                            # add the hubbard_gme package (editable)
 ```
 
-**Optional extras:**
+**Option B — minimal, pip-only (Hubbard pipeline only).** Skips molecular /
+GPU / LaTeX tooling:
+
+```bash
+pip install -e .                  # installs requirements.txt + the package
+# or, dependencies only (then run with PYTHONPATH=src, see below):
+pip install -r requirements.txt
+```
+
+**Optional extras (not in either environment file):**
 
 ```bash
 pip install cvxpy                 # SDP lower bound
