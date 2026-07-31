@@ -5,10 +5,70 @@ Loading slurm
   Loading requirement: nvidia/cuda-12.0.0 gcc-8.5.0/hwloc-2.9.1
     gcc-8.5.0/pmix-4.2.2 gcc-8.5.0/ucx-1.14.1
 sending incremental file list
+README.md
+            700   3%    0.00kB/s    0:00:00           20.07K 100%   18.47MB/s    0:00:00 (xfr#1, ir-chk=1047/1054)
+main.py
+            700   1%  683.59kB/s    0:00:00           68.00K 100%   64.85MB/s    0:00:00 (xfr#2, ir-chk=1038/1054)
 rsync_upload_to_hpc_log.txt
-            376 100%    0.00kB/s    0:00:00              376 100%    0.00kB/s    0:00:00 (xfr#1, to-chk=1004/1030)
+            628 100%  613.28kB/s    0:00:00              628 100%  613.28kB/s    0:00:00 (xfr#3, ir-chk=1028/1054)
+setup.py
+          1.05K 100%    1.01MB/s    0:00:00            1.05K 100%    1.01MB/s    0:00:00 (xfr#4, ir-chk=1025/1054)
+outputs/ES_tscan_L8_U5.0_task3_tscan_GME_L8_U5.0_full_t0.05to2_N20_20260729_224039.pdf
+         27.51K 100%  160.86kB/s    0:00:00           27.51K 100%  160.86kB/s    0:00:00 (xfr#5, to-chk=894/1058)
+outputs/L6_singlet_t1_U10_task2_excited_singlet_GME_L6_t1.0_U10.0_T0_20260729_203826.pdf
+         19.70K 100%  115.23kB/s    0:00:00           19.70K 100%  115.23kB/s    0:00:00 (xfr#6, to-chk=819/1058)
+outputs/L6_singlet_t1_U10_task2_excited_singlet_GME_L6_t1.0_U10.0_T0_20260729_204351.pdf
+         19.70K 100%  115.23kB/s    0:00:00           19.70K 100%  115.23kB/s    0:00:00 (xfr#7, to-chk=818/1058)
+outputs/L6_singlet_t1_U10_task2_excited_singlet_thermal_L6_t1.0_U10.0_T0.01to5_N30_20260729_203826.pdf
+         25.85K 100%  151.18kB/s    0:00:00           25.85K 100%  151.18kB/s    0:00:00 (xfr#8, to-chk=810/1058)
+outputs/L6_singlet_t1_U10_task2_excited_singlet_thermal_L6_t1.0_U10.0_T0.01to5_N30_20260729_204351.pdf
+         25.85K 100%  151.18kB/s    0:00:00           25.85K 100%  151.18kB/s    0:00:00 (xfr#9, to-chk=809/1058)
+outputs/Log_Vscan_L=6_Ne=6_t=1.0_U=10.txt
+         20.32K 100%  118.11kB/s    0:00:00           20.32K 100%  118.11kB/s    0:00:00 (xfr#10, to-chk=753/1058)
+outputs/Vscan_U10_excited_singlet_task4_vscan_GME_L6_U10.0_t1.0_full_V0to15_N16_20260729_131332.pdf
+         25.55K 100%  148.50kB/s    0:00:00           25.55K 100%  148.50kB/s    0:00:00 (xfr#11, to-chk=741/1058)
+outputs/Vscan_U10_task4_vscan_GME_L6_U10.0_t1.0_full_V0to15_N16_20260729_131326.pdf
+         25.76K 100%  149.76kB/s    0:00:00           25.76K 100%  149.76kB/s    0:00:00 (xfr#12, to-chk=739/1058)
+outputs/task1_thermal_GME_L6_t0.1_U10.0_full_T0to5_N40_20260730_083931.pdf
+         27.45K 100%  159.57kB/s    0:00:00           27.45K 100%  159.57kB/s    0:00:00 (xfr#13, to-chk=723/1058)
+outputs/task1_thermal_GME_L6_t0.1_U10.0_full_T0to5_N40_20260730_083941.pdf
+         27.45K 100%  159.57kB/s    0:00:00           27.45K 100%  159.57kB/s    0:00:00 (xfr#14, to-chk=722/1058)
+outputs/task1_thermal_GME_L6_t1.0_U10.0_sz0_T0.01to5_N40_20260730_083932.pdf
+         27.32K 100%  158.83kB/s    0:00:00           27.32K 100%  158.83kB/s    0:00:00 (xfr#15, to-chk=721/1058)
+outputs/task1_thermal_GME_L6_t1.0_U10.0_sz0_T0.01to5_N40_20260730_083942.pdf
+         27.32K 100%  158.83kB/s    0:00:00           27.32K 100%  158.83kB/s    0:00:00 (xfr#16, to-chk=720/1058)
+outputs/task1_thermal_GME_L6_t1.0_U10.0_sz0_T0to1_N40_20260730_083933.pdf
+         27.50K 100%  159.88kB/s    0:00:00           27.50K 100%  159.88kB/s    0:00:00 (xfr#17, to-chk=719/1058)
+outputs/task1_thermal_GME_L6_t1.0_U10.0_sz0_T0to1_N40_20260730_083944.pdf
+         27.50K 100%  159.88kB/s    0:00:00           27.50K 100%  159.88kB/s    0:00:00 (xfr#18, to-chk=718/1058)
+outputs/task1_thermal_GME_L6_t1.0_U10.0_sz0_T0to5_N40_20260730_083933.pdf
+         27.24K 100%  158.33kB/s    0:00:00           27.24K 100%  158.33kB/s    0:00:00 (xfr#19, to-chk=717/1058)
+outputs/task1_thermal_GME_L6_t1.0_U10.0_sz0_T0to5_N40_20260730_083943.pdf
+         27.24K 100%  158.33kB/s    0:00:00           27.24K 100%  158.33kB/s    0:00:00 (xfr#20, to-chk=716/1058)
+outputs/task1_thermal_GME_L8_t0.1_U10.0_full_T0to5_N40_20260730_083940.pdf
+         29.34K 100%  170.53kB/s    0:00:00           29.34K 100%  170.53kB/s    0:00:00 (xfr#21, to-chk=715/1058)
+outputs/task1_thermal_GME_L8_t0.1_U10.0_full_T0to5_N40_20260730_084607.pdf
+         29.34K 100%  170.53kB/s    0:00:00           29.34K 100%  170.53kB/s    0:00:00 (xfr#22, to-chk=714/1058)
+outputs/task1_thermal_GME_L8_t0.1_U10.0_full_T0to5_N40_20260730_104230.pdf
+         29.34K 100%  169.52kB/s    0:00:00           29.34K 100%  169.52kB/s    0:00:00 (xfr#23, to-chk=713/1058)
+outputs/task1_thermal_GME_L8_t0.1_U10.0_full_T0to5_N40_20260730_110745.pdf
+         26.09K 100%  150.74kB/s    0:00:00           26.09K 100%  150.74kB/s    0:00:00 (xfr#24, to-chk=712/1058)
+outputs/task1_thermal_GME_L8_t0.1_U10.0_full_T0to5_N40_20260730_110803.pdf
+         25.38K 100%  146.67kB/s    0:00:00           25.38K 100%  146.67kB/s    0:00:00 (xfr#25, to-chk=711/1058)
+outputs/task2_excited_singlet_GME_L6_t1.0_U10.0_T0_20260730_083952.pdf
+         19.70K 100%  113.86kB/s    0:00:00           19.70K 100%  113.86kB/s    0:00:00 (xfr#26, to-chk=710/1058)
+outputs/task2_excited_singlet_GME_L6_t1.0_U10.0_T0_20260730_095235.pdf
+         19.70K 100%  113.86kB/s    0:00:00           19.70K 100%  113.86kB/s    0:00:00 (xfr#27, to-chk=709/1058)
+outputs/task2_excited_singlet_thermal_L6_t1.0_U10.0_T0.01to5_N30_20260730_083952.pdf
+         25.85K 100%  149.39kB/s    0:00:00           25.85K 100%  149.39kB/s    0:00:00 (xfr#28, to-chk=708/1058)
+outputs/task2_excited_singlet_thermal_L6_t1.0_U10.0_T0.01to5_N30_20260730_095235.pdf
+         25.85K 100%  149.39kB/s    0:00:00           25.85K 100%  149.39kB/s    0:00:00 (xfr#29, to-chk=707/1058)
+src/hubbard_gme/convex_roof.py
+          4.40K   4%   12.45kB/s    0:00:07          103.87K 100%  293.17kB/s    0:00:00 (xfr#30, to-chk=186/1058)
+src/hubbard_gme/rdm.py
+            700   1%    1.98kB/s    0:00:20           41.47K 100%  117.05kB/s    0:00:00 (xfr#31, to-chk=163/1058)
 src/hubbard_gme/thermal_pipeline.py
-            700   0%    2.76kB/s    0:00:53          148.09K 100%  583.15kB/s    0:00:00 (xfr#2, to-chk=158/1030)
+            700   0%    1.98kB/s    0:01:14          148.59K 100%  419.39kB/s    0:00:00 (xfr#32, to-chk=158/1058)
 
-sent 52.72K bytes  received 1.42K bytes  4.01K bytes/sec
-total size is 1.34G  speedup is 24,794.44
+sent 723.33K bytes  received 3.95K bytes  58.18K bytes/sec
+total size is 1.34G  speedup is 1,846.64

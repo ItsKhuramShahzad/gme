@@ -803,7 +803,9 @@ def run_pure_analysis(
         if force_rdm_recompute:
             print("      [cache] force_rdm_recompute=True -> recomputing RDMs and overwriting cache")
 
-        for n_ord in range(min_n_body, max_n_body + 1):
+        # Cap at n_electrons: an n-site RDM with n > Ne has zero trace (can't
+        # occupy more sites than there are electrons). Half-filling → no change.
+        for n_ord in range(min_n_body, min(max_n_body, n_electrons) + 1):
             clusters = generate_site_clusters(L, n_ord)
             print(f"  Loading/computing {n_ord}-body RDMs ({len(clusters)} clusters) …", flush=True)
 
@@ -1300,7 +1302,8 @@ def run_pure_analysis(
         # Suffix to keep ground-state output filenames unchanged.
         state_suffix = f"_state{state_idx}" if state_idx > 0 else ""
 
-        for n in range(3, max_n_body + 1):
+        # Cap at n_electrons: n-site RDM with n > Ne has zero trace.
+        for n in range(3, min(max_n_body, n_electrons) + 1):
 
             # (a) Main GME PDF — heatmap + convex roof + supervisor bounds
             fname = os.path.join(

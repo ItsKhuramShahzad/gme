@@ -403,6 +403,40 @@ def classify_eigenstates_spin(
     return info
 
 
+def print_spin_classification(
+    energies: np.ndarray,
+    eigvecs: np.ndarray,
+    *,
+    L: int,
+    n_electrons: int,
+    n_spin_orbitals: int,
+    spin_preserving: bool = True,
+    k: int = 16,
+    header: str = "Eigenstate spin classification",
+) -> list[dict]:
+    """
+    Classify the first ``k`` eigenstates by <S^2> and print the table.
+
+    Single shared implementation used by EVERY analysis path (ground-state
+    scans, thermal, tT-surface, and the excited-singlet search), so the table
+    looks identical everywhere. Returns the spin table so callers that need it
+    (e.g. locating the first singlet) can reuse it without re-classifying.
+    """
+    k = int(min(k, energies.shape[0]))
+    spin_table = classify_eigenstates_spin(
+        eigvecs=eigvecs[:, :k], energies=energies[:k],
+        L=L, n_electrons=n_electrons, n_spin_orbitals=n_spin_orbitals,
+        spin_preserving=spin_preserving,
+    )
+    print(f"\n  {header}:")
+    print(f"  {'idx':>3}  {'E':>14}  {'<S²>':>8}  {'S':>5}  label")
+    print("  " + "-" * 50)
+    for row in spin_table:
+        print(f"  {row['idx']:>3}  {row['energy']:>14.8f}  "
+              f"{row['S2']:>8.4f}  {row['S']:>5.3f}  {row['spin_label']}")
+    return spin_table
+
+
 # ── Convenience operators ────────────────────────────────────────────────────
 
 def compute_all_eigenstates(
@@ -416,10 +450,16 @@ def compute_all_eigenstates(
     t_perp:  float = None,
     spin_preserving: bool = True,
     V:       float = 0.0,
-
+    classify_spin: bool = False,
+    classify_k:    int = 16,
 ) -> tuple[np.ndarray, np.ndarray, int]:
     """
     Full dense diagonalization — returns ALL eigenstates.
+
+    classify_spin : if True, print the <S^2> spin-classification table for the
+                    first ``classify_k`` eigenstates (the same table the
+                    excited-singlet search prints). Opt-in so quiet/internal
+                    calls stay silent.
 
     Uses numpy.linalg.eigh on the dense Hamiltonian matrix.
     Suitable for small systems (L ≤ 8, dim ≤ ~1000).
@@ -439,6 +479,12 @@ def compute_all_eigenstates(
         H, n_so, n_electrons, spin_preserving=spin_preserving
     )
     energies, eigvecs = np.linalg.eigh(H_sp.toarray())
+    if classify_spin:
+        print_spin_classification(
+            energies, eigvecs, L=L, n_electrons=n_electrons,
+            n_spin_orbitals=n_so, spin_preserving=spin_preserving,
+            k=classify_k,
+        )
     return energies, eigvecs, n_so
 
 

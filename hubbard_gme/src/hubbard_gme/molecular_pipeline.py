@@ -693,6 +693,12 @@ def run_molecular_analysis(
         print(f"  <S2>={S2:.4f}  S={S_val:.2f}  {spin_label}  "
               f"<D>={D_total:.4f}")
 
+    # Cap cluster size at min(norb, Ne): an n-orbital RDM with n > Ne (more
+    # orbitals than electrons) has zero trace, same as the molecular_surface /
+    # mol-thermal paths. Flows to the RDM build and the per-n loops below.
+    # At a half-filled CAS (ne == norb) this is a no-op.
+    max_n_body = min(max_n_body, ne, norb_cas)
+
     # ── 4. All RDMs ─────────────────────────────────────────────────────────
     rdm_dict = compute_all_molecular_rdms(
         psi=psi0,

@@ -246,6 +246,10 @@ def compute_all_pure_rdms(
     metrics:  dict = {}
 
     for n in range(min_n, max_n + 1):
+        if n > n_electrons:
+            # An n-site RDM with n > Ne has zero trace (cannot occupy more
+            # sites than there are electrons); skip it.
+            continue
         clusters = generate_site_clusters(L, n)
         print(f"  Computing {n}-body RDMs ({len(clusters)} clusters) …", flush=True)
 
