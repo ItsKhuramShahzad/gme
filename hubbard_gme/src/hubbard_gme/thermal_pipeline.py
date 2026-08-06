@@ -674,7 +674,7 @@ def build_or_load_rdm_bank(
 
 # ── GME bound dispatch ────────────────────────────────────────────────────────
 
-def _gme_lower_bound(
+def compute_gme(
     Gamma_T: np.ndarray,
     n: int,
     solver: str = "gcg",
@@ -826,7 +826,7 @@ def _thermal_gme_worker(args):
     ) = args
     np.random.seed(int(seed))
     t0 = time.time()
-    c_val, pur, detail = _gme_lower_bound(
+    c_val, pur, detail = compute_gme(
         Gamma_T,
         n,
         solver=solver,
@@ -1981,7 +1981,7 @@ def run_excited_singlet_gme(
         rho_raw = _rdm_from_ops(ops_cache[n], psi_singlet, n)
         tr = np.real(np.trace(rho_raw))
         rho = rho_raw / tr if abs(tr) > 1e-14 else rho_raw
-        c_val, pur, _detail = _gme_lower_bound(
+        c_val, pur, _detail = compute_gme(
             rho, n,
             solver=solver, n_restarts=n_restarts,
             max_iter=max_iter, tol=tol, k_max_extra=k_max_extra,
@@ -2065,7 +2065,7 @@ def run_excited_singlet_gme(
         else:
             for job in _tqdm(jobs_tsweep, desc="  Singlet T-sweep GME", unit="job", ncols=90):
                 i, T, n, Gamma_T, *rest = job
-                c_val, pur, _detail = _gme_lower_bound(
+                c_val, pur, _detail = compute_gme(
                     Gamma_T, n, solver=solver, n_restarts=n_restarts,
                     max_iter=max_iter, tol=tol, k_max_extra=k_max_extra,
                 )
@@ -2204,9 +2204,14 @@ def plot_scan_finalized(result: dict, plot_path: str,
 
     is_t = "t_values" in result
     is_v = "V_values" in result
+    is_N = "N_values" in result
     V = float(si.get("V", 0.0))
 
-    if is_v:                                     # V-scan: fix U & t, sweep V
+    if is_N:                                     # N-scan: fix U, t, V; sweep Ne
+        t = float(si.get("t", 1.0)); U = float(si.get("U", 0.0))
+        x = np.asarray(result["N_values"], float)
+        xlabel, fixed, xkind = r"$N$ (electrons)", f"U={U}, t={t}", "N"
+    elif is_v:                                   # V-scan: fix U & t, sweep V
         t = float(si.get("t", 1.0)); U = float(si.get("U", 0.0))
         x = (np.asarray(result["V_over_t"], float) if "V_over_t" in result
              else np.asarray(result["V_values"], float) / t)
@@ -2272,9 +2277,12 @@ def plot_scan_finalized(result: dict, plot_path: str,
     # excited-singlet figure are otherwise indistinguishable
     _state = ("1st excited singlet" if result.get("excited_singlet")
               else "ground state")
-    ax.set_title(f"{xkind}-dependence of GME: L={L}, Ne={Ne}, {fixed}, mode={mode}{v_tag}, "
+    ne_tag = "" if is_N else f"Ne={Ne}, "          # Ne is the swept axis in the N-scan
+    xr = (f"[{int(x.min())}, {int(x.max())}]" if is_N
+          else f"[{x.min():.3f}, {x.max():.3f}]")
+    ax.set_title(f"{xkind}-dependence of GME: L={L}, {ne_tag}{fixed}, mode={mode}{v_tag}, "
                  f"T=0, {_state}  [{sector}]\n"
-                 f"{xlabel.strip('$')} $\\in$ [{x.min():.3f}, {x.max():.3f}]  "
+                 f"{xlabel.replace('$', '')} $\\in$ {xr}  "
                  f"({len(x)} points)", fontsize=11)
     ax.grid(alpha=0.3)
     # C_GME lives in [0, 1], but curves sitting exactly ON a bound (n=2 at 0 for
@@ -2455,7 +2463,7 @@ def run_t_dependence_gme(
             tr = np.real(np.trace(rho_raw))
             rho = rho_raw / tr if abs(tr) > 1e-14 else rho_raw
 
-            c_val, pur, _detail = _gme_lower_bound(
+            c_val, pur, _detail = compute_gme(
                 rho, n,
                 solver=solver, n_restarts=n_restarts,
                 max_iter=max_iter, tol=tol, k_max_extra=k_max_extra,
@@ -2469,7 +2477,7 @@ def run_t_dependence_gme(
 
             if n == n_max and compute_purity(rho) > 1.0 - 1e-6:
                 # pure formula is valid only for a pure RDM (same check as
-                # _gme_lower_bound); a mixed n_max RDM would give a spurious line
+                # compute_gme); a mixed n_max RDM would give a spurious line
                 C_exact[i] = float(compute_C_GME_pure(rho, n_max))
 
             if n == 2:
@@ -2499,7 +2507,7 @@ def run_t_dependence_gme(
         "purity":             purity_dict,
         "entropy":            entropy_dict,
         "rank":               rank_dict,
-        "convergence":        convergence,   # {n: [solver detail per t] } — standard _gme_lower_bound format
+        "convergence":        convergence,   # {n: [solver detail per t] } — standard compute_gme format
         "n_values":           n_values,
         "solver":             solver,
         "system_info":        dict(L=L, U=U, V=V, mode=mode, Ne=n_electrons),
@@ -3227,7 +3235,7 @@ def run_tT_surface_gme(
         # same self-contained metric set the t-scan / U-scan PKLs carry
         "entropy_surface": entropy_surface,   # {n: (n_t, n_T)}
         "rank_surface":    rank_surface,      # {n: (n_t, n_T)}
-        "convergence":     convergence_surface,  # {n: [[detail per T] per t]} — standard _gme_lower_bound format
+        "convergence":     convergence_surface,  # {n: [[detail per T] per t]} — standard compute_gme format
         "n_values":        n_values,
         "solver":          solver,
         "spin_preserving": bool(spin_preserving),
@@ -3339,7 +3347,6 @@ def _vscan_cache_path(
         f"{_grid_tag(V_arr, 'V')}-{_array_digest(V_arr)}.pkl"
     )
     return _thermal_runs_dir() / filename
-
 
 def _make_figure_U(
     U_values: np.ndarray,
@@ -3539,7 +3546,7 @@ def run_U_dependence_gme(
             tr = np.real(np.trace(rho_raw))
             rho = rho_raw / tr if abs(tr) > 1e-14 else rho_raw
 
-            c_val, pur, _detail = _gme_lower_bound(
+            c_val, pur, _detail = compute_gme(
                 rho, n,
                 solver=solver, n_restarts=n_restarts,
                 max_iter=max_iter, tol=tol, k_max_extra=k_max_extra,
@@ -3553,7 +3560,7 @@ def run_U_dependence_gme(
 
             if n == n_max and compute_purity(rho) > 1.0 - 1e-6:
                 # pure formula is valid only for a pure RDM (same check as
-                # _gme_lower_bound); a mixed n_max RDM would give a spurious line
+                # compute_gme); a mixed n_max RDM would give a spurious line
                 C_exact[i] = float(compute_C_GME_pure(rho, n_max))
 
             if n == 2:                       # analytic bipartite references
@@ -3582,7 +3589,7 @@ def run_U_dependence_gme(
         "purity":        purity_dict,
         "entropy":       entropy_dict,
         "rank":          rank_dict,
-        "convergence":   convergence,   # {n: [solver detail per U]} — standard _gme_lower_bound format
+        "convergence":   convergence,   # {n: [solver detail per U]} — standard compute_gme format
         "n_values":      n_values,
         "solver":        solver,
         "system_info":   dict(L=L, t=t,V=V, mode=mode, Ne=n_electrons),
@@ -3624,242 +3631,6 @@ def run_U_dependence_gme(
         print(f"    U-scan PKL → {cache_path}")
 
     return result
-
-
-def run_N_dependence_gme(
-    L: int,
-    V_values: np.ndarray,
-    t: float,
-    U: float,
-    mode: str = "uniform",
-    n_electrons: Optional[int] = None,
-    n_min: int = 2,
-    output_dir: str = "outputs",
-    output_prefix: str = "",
-    solver: str = "gcg",
-    n_restarts: int = 20,
-    max_iter: int = 300,
-    tol: float = 1e-9,
-    k_max_extra: int = 4,
-    verbose: bool = True,
-    save_pkl: bool = True,
-    use_pkl_cache: bool = False,
-    cache_version: str = "v1",
-    force_recompute: bool = False,
-    spin_preserving: bool = True,
-    excited_singlet: bool = False,
-    singlet_k: int = 12,
-) -> dict:
-    """
-    Compute C_GME(n) at T=0 for each value of the nearest-neighbour interaction
-    V (fixing t and U) — the extended-Hubbard V-scan.
-
-    The x-axis is V/t. As V grows past ~U/2 the ring crosses from the Mott/SDW
-    regime into a charge-density-wave (CDW) state, and short-range C_GME
-    collapses — the transition shows up directly as a curve.
-
-    Structurally identical to ``run_U_dependence_gme`` with U and V swapped:
-    here U is fixed and V is swept.
-
-    Returns
-    -------
-    dict
-        V_values, V_over_t, C_GME {n: array}, purity {n: array},
-        system_info, plot_path
-    """
-    if n_electrons is None:
-        n_electrons = L
-    # Cluster size cannot exceed the electron count: the n-site RDM trace is
-    # ⟨Π_site n̂_site⟩, which is exactly 0 once n > Ne (can't occupy more sites
-    # than there are electrons). Cap at min(L, Ne) so doped (Ne<L) runs stop at
-    # n=Ne instead of hitting a zero-trace RDM. At half-filling Ne=L → no change.
-    n_max = min(L, n_electrons)
-    n_values = list(range(n_min, n_max + 1))
-    V_values = np.asarray(V_values, dtype=float)
-    ts = _run_timestamp()
-
-    cache_path = _vscan_cache_path(
-        L=L, U=U, t=t, mode=mode, n_electrons=n_electrons,
-        n_min=n_min, solver=solver, n_restarts=n_restarts,
-        max_iter=max_iter, tol=tol, k_max_extra=k_max_extra,
-        V_values=V_values, cache_version=cache_version,
-        spin_preserving=spin_preserving, excited_singlet=excited_singlet,
-    )
-
-    if use_pkl_cache and not force_recompute and cache_path.exists():
-        payload = _load_thermal_result_pkl(cache_path)
-        result = dict(payload["result"])
-        result["loaded_from_cache"] = True
-        result["cache_path"] = str(cache_path)
-        os.makedirs(output_dir, exist_ok=True)
-        prefix = f"{output_prefix}_" if output_prefix else ""
-        plot_path = os.path.join(
-            output_dir,
-            f"{prefix}task4_vscan_GME_L{L}_U{U}_t{t}_{_sector_tag(spin_preserving)}_{_grid_tag(np.asarray(result['V_values']), 'V')}_{ts}.pdf"
-        )
-        plot_scan_finalized(result, plot_path, spin_preserving=spin_preserving)
-        result["plot_path"] = plot_path
-        print(f"\n[cache] loaded V-scan PKL → {cache_path}")
-        print(f"[cache] regenerated plot → {plot_path}")
-        return result
-
-    print(f"\n{'='*64}")
-    print(f"  V-DEPENDENCE GME SCAN (T=0)")
-    print(f"{'='*64}")
-    print(f"  L={L}  U={U}  t={t}  Ne={n_electrons}  mode={mode}")
-    print(f"  V range [{V_values[0]:.4g}, {V_values[-1]:.4g}]  ({len(V_values)} points)")
-    print(f"  n = {n_min}..{n_max}")
-    print(f"{'-'*64}")
-
-    C_GME: dict[int, np.ndarray] = {n: np.zeros(len(V_values)) for n in n_values}
-    purity_dict: dict[int, np.ndarray] = {n: np.zeros(len(V_values)) for n in n_values}
-    entropy_dict: dict[int, np.ndarray] = {n: np.zeros(len(V_values)) for n in n_values}
-    rank_dict: dict[int, np.ndarray] = {n: np.zeros(len(V_values), dtype=int) for n in n_values}
-    convergence: dict[int, list] = {n: [None] * len(V_values) for n in n_values}
-    singlet_idx: np.ndarray = np.full(len(V_values), -1, dtype=int)
-    singlet_energy: np.ndarray = np.full(len(V_values), np.nan)
-    C_exact: np.ndarray = np.full(len(V_values), np.nan)
-    C_wootters_n2: np.ndarray = np.full(len(V_values), np.nan)
-    C_analytical_n2: np.ndarray = np.full(len(V_values), np.nan)
-    tag = "C_GCG" if solver == "gcg" else "C_LB"
-
-    for i, V in enumerate(V_values):
-        if verbose:
-            print(f"\n  V={V:.4g} (V/t={V/t:.4f}) …", flush=True)
-
-        energies, eigvecs, n_so = compute_all_eigenstates(
-            L, t, U, mode, n_electrons, spin_preserving=spin_preserving, V=V,
-            classify_spin=(verbose and not excited_singlet), classify_k=singlet_k,
-        )
-        if excited_singlet:
-            # The first-excited-singlet index moves with V through level
-            # crossings, so re-locate it at every grid point.
-            info = find_first_excited_singlet(
-                L=L, t=t, U=float(U), V=V, mode=mode,
-                n_electrons=n_electrons, k=singlet_k,
-                spin_preserving=spin_preserving,
-            )
-            E0 = float(info["energy"])
-            psi0 = np.asarray(info["psi"])
-            singlet_idx[i] = int(info["idx"])
-            singlet_energy[i] = E0
-            if verbose:
-                print(f"    first excited singlet: idx={info['idx']}  "
-                      f"E={E0:.8f}", flush=True)
-        else:
-            E0 = energies[0]
-            psi0 = eigvecs[:, 0]
-
-        degen = np.where(np.abs(energies - E0) < 1e-10)[0]
-        if len(degen) > 1 and verbose:
-            _lbl = "excited singlet" if excited_singlet else "ground state"
-            print(f"    [WARN] {len(degen)}-fold degenerate {_lbl}")
-
-        for n in n_values:
-            sites = tuple(range(n))
-            ops = _precompute_ops(sites, n_so, n_electrons,
-                                  spin_preserving=spin_preserving)
-
-            if len(degen) <= 1:
-                # <=1: non-degenerate state — use psi0 directly. This also
-                # guards the excited-singlet path where E0 comes from a
-                # separate diagonalisation: if it fails to match any entry in
-                # `energies` (degen empty), fall back to psi0 instead of
-                # dividing a zero matrix by 0 (which produced silent NaNs).
-                rho_raw = _rdm_from_ops(ops, psi0, n)
-            else:
-                dim = 2 ** n
-                rho_raw = np.zeros((dim, dim), dtype=complex)
-                for d_idx in degen:
-                    rho_raw += _rdm_from_ops(ops, eigvecs[:, d_idx], n)
-                rho_raw /= len(degen)
-
-            tr = np.real(np.trace(rho_raw))
-            rho = rho_raw / tr if abs(tr) > 1e-14 else rho_raw
-
-            c_val, pur, _detail = _gme_lower_bound(
-                rho, n,
-                solver=solver, n_restarts=n_restarts,
-                max_iter=max_iter, tol=tol, k_max_extra=k_max_extra,
-            )
-            C_GME[n][i] = c_val
-            purity_dict[n][i] = pur
-            entropy_dict[n][i] = float(compute_entropy(rho))
-            rank_dict[n][i] = int(np.sum(np.real(np.linalg.eigvalsh(rho)) > 1e-10))
-            convergence[n][i] = _detail
-
-            if n == n_max and compute_purity(rho) > 1.0 - 1e-6:
-                # pure formula is valid only for a pure RDM (same check as
-                # _gme_lower_bound); a mixed n_max RDM would give a spurious line
-                C_exact[i] = float(compute_C_GME_pure(rho, n_max))
-
-            if n == 2:
-                C_analytical_n2[i] = _cgme_analytical_n2(rho)
-                C_wootters_n2[i]   = _wootters_concurrence(rho)
-
-        if verbose:
-            print("    " + "  ".join(
-                f"{tag}(n={n})={C_GME[n][i]:.4f}" for n in n_values
-            ))
-
-    # Plot
-    os.makedirs(output_dir, exist_ok=True)
-    prefix = f"{output_prefix}_" if output_prefix else ""
-    plot_path = os.path.join(
-        output_dir, f"{prefix}task4_vscan_GME_L{L}_U{U}_t{t}_{_sector_tag(spin_preserving)}_{_grid_tag(V_values, 'V')}_{ts}.pdf"
-    )
-
-    result = {
-        "V_values":      V_values,
-        "V_over_t":      V_values / t,
-        "C_GME":         C_GME,
-        "C_exact_nL":    C_exact,
-        "C_wootters_n2": C_wootters_n2,
-        "C_analytical_n2": C_analytical_n2,
-        "purity":        purity_dict,
-        "entropy":       entropy_dict,
-        "rank":          rank_dict,
-        "convergence":   convergence,
-        "n_values":      n_values,
-        "solver":        solver,
-        "system_info":   dict(L=L, t=t, U=U, mode=mode, Ne=n_electrons),
-        "excited_singlet": bool(excited_singlet),
-        "singlet_k":       int(singlet_k),
-        "singlet_idx":     singlet_idx,
-        "singlet_energy":  singlet_energy,
-        "plot_path":     plot_path,
-        "run_timestamp": ts,
-    }
-
-    plot_scan_finalized(result, plot_path, spin_preserving=spin_preserving)
-    print(f"\n    Plot → {plot_path}")
-
-    if save_pkl or use_pkl_cache:
-        metadata = {
-            "analysis_type": "V_dependence",
-            "cache_version": cache_version,
-            "L": int(L), "t": float(t), "U": float(U),
-            "mode": str(mode), "Ne": int(n_electrons),
-            "n_min": int(n_min), "n_max": int(n_max),
-            "n_values": list(n_values),
-            "V_values": V_values.tolist(),
-            "V_digest": _array_digest(V_values),
-            "solver": solver, "n_restarts": int(n_restarts),
-            "max_iter": int(max_iter), "tol": float(tol),
-            "k_max_extra": int(k_max_extra),
-            "plot_path": plot_path,
-            "run_timestamp": ts,
-        }
-        _save_thermal_result_pkl(
-            cache_path=cache_path, metadata=metadata, result=result
-        )
-        result["pkl_path"] = str(cache_path)
-        result["cache_path"] = str(cache_path)
-        print(f"    V-scan PKL → {cache_path}")
-
-    return result
-
-
 
 
 def run_V_dependence_gme(
@@ -4013,7 +3784,7 @@ def run_V_dependence_gme(
             tr = np.real(np.trace(rho_raw))
             rho = rho_raw / tr if abs(tr) > 1e-14 else rho_raw
 
-            c_val, pur, _detail = _gme_lower_bound(
+            c_val, pur, _detail = compute_gme(
                 rho, n,
                 solver=solver, n_restarts=n_restarts,
                 max_iter=max_iter, tol=tol, k_max_extra=k_max_extra,
@@ -4026,7 +3797,7 @@ def run_V_dependence_gme(
 
             if n == n_max and compute_purity(rho) > 1.0 - 1e-6:
                 # pure formula is valid only for a pure RDM (same check as
-                # _gme_lower_bound); a mixed n_max RDM would give a spurious line
+                # compute_gme); a mixed n_max RDM would give a spurious line
                 C_exact[i] = float(compute_C_GME_pure(rho, n_max))
 
             if n == 2:
@@ -4092,5 +3863,275 @@ def run_V_dependence_gme(
         result["pkl_path"] = str(cache_path)
         result["cache_path"] = str(cache_path)
         print(f"    V-scan PKL → {cache_path}")
+
+    return result
+
+
+
+
+
+
+def _nscan_cache_path(
+    *,
+    L: int,
+    U: float,
+    t: float,
+    V: float,
+    mode: str,
+    n_min: int,
+    solver: str,
+    n_restarts: int,
+    max_iter: int,
+    tol: float,
+    k_max_extra: int,
+    N_values,
+    cache_version: str,
+    spin_preserving: bool = True,
+    excited_singlet: bool = False,
+) -> Path:
+    """Deterministic PKL path for one N-scan (fixed L, U, t, V; Ne swept)."""
+    N_arr = np.asarray(N_values, dtype=float)
+    filename = (
+        f"nscan_{cache_version}_"
+        f"L{L}_U{_safe_float_tag(U)}_t{_safe_float_tag(t)}_"
+        f"mode-{mode}_nmin{n_min}_solver-{solver}_"
+        f"{_sector_tag(spin_preserving)}"
+        f"{'_es' if excited_singlet else ''}"
+        f"{('_V' + _safe_float_tag(float(V))) if abs(V) > 1e-12 else ''}_"
+        f"restarts{int(n_restarts)}_iter{int(max_iter)}_"
+        f"kmax{int(k_max_extra)}_tol{_safe_float_tag(float(tol))}_"
+        f"N{int(min(N_values))}to{int(max(N_values))}_"
+        f"n{len(N_values)}-{_array_digest(N_arr)}.pkl"
+    )
+    return _thermal_runs_dir() / filename
+
+
+def run_Ne_dependence_gme(
+    L: int,
+    N_values: np.ndarray,
+    t: float,
+    U: float,
+    V: float = 0.0,
+    mode: str = "uniform",
+    n_min: int = 2,
+    output_dir: str = "outputs",
+    output_prefix: str = "",
+    solver: str = "gcg",
+    n_restarts: int = 20,
+    max_iter: int = 300,
+    tol: float = 1e-9,
+    k_max_extra: int = 4,
+    verbose: bool = True,
+    save_pkl: bool = True,
+    use_pkl_cache: bool = False,
+    cache_version: str = "v1",
+    force_recompute: bool = False,
+    spin_preserving: bool = False,
+    excited_singlet: bool = False,
+    singlet_k: int = 16,
+) -> dict:
+    """
+    C_GME(n) at T=0 as a function of the electron number Ne (the N-scan),
+    fixing L, U, t and V. For each Ne the (possibly degenerate) ground state is
+    used; a degenerate manifold is averaged (T->0 Gibbs), which needs the full
+    Hilbert space (spin_preserving=False). One curve per body order n; each
+    n-curve is defined only for Ne >= n (entries with n > Ne stay NaN).
+
+    Returns
+    -------
+    dict with N_values, C_GME {n: array}, purity {n: array}, system_info, plot_path
+    """
+    N_values = [int(x) for x in np.asarray(N_values).ravel()]
+    # Each Ne has its own n_max = min(L, Ne); curves span every n up to the
+    # largest reachable value, and entries with n > Ne stay NaN (nBRDM needs Ne>=n).
+    n_hi = min(L, max(N_values))
+    n_values = list(range(n_min, n_hi + 1))
+    ts = _run_timestamp()
+    Nn = len(N_values)
+
+    cache_path = _nscan_cache_path(
+        L=L, U=U, t=t, V=V, mode=mode,
+        n_min=n_min, solver=solver, n_restarts=n_restarts,
+        max_iter=max_iter, tol=tol, k_max_extra=k_max_extra,
+        N_values=N_values, cache_version=cache_version,
+        spin_preserving=spin_preserving, excited_singlet=excited_singlet,
+    )
+
+    _state = "1st excited singlet" if excited_singlet else "ground state"
+    _vtag = f"_V{_safe_float_tag(V)}" if abs(V) > 1e-12 else ""
+
+    def _nscan_plot_path():
+        prefix = f"{output_prefix}_" if output_prefix else ""
+        return os.path.join(
+            output_dir,
+            f"{prefix}task_nscan_GME_L{L}_U{U}_t{t}{_vtag}_"
+            f"{'es_' if excited_singlet else ''}{_sector_tag(spin_preserving)}_"
+            f"N{min(N_values)}to{max(N_values)}_{ts}.pdf"
+        )
+
+    if use_pkl_cache and not force_recompute and cache_path.exists():
+        payload = _load_thermal_result_pkl(cache_path)
+        result = dict(payload["result"])
+        result["loaded_from_cache"] = True
+        result["cache_path"] = str(cache_path)
+        os.makedirs(output_dir, exist_ok=True)
+        plot_path = _nscan_plot_path()
+        plot_scan_finalized(result, plot_path, spin_preserving=spin_preserving)
+        result["plot_path"] = plot_path
+        print(f"\n[cache] loaded N-scan PKL -> {cache_path}")
+        print(f"[cache] regenerated plot -> {plot_path}")
+        return result
+
+    print(f"\n{'='*64}")
+    print(f"  N-DEPENDENCE GME SCAN (T=0) - {_state}")
+    print(f"{'='*64}")
+    print(f"  L={L}  U={U}  t={t}  V={V}  mode={mode}")
+    print(f"  N (electrons): {N_values}")
+    print(f"  n = {n_min}..{n_hi}   (each n-curve defined for N >= n)")
+    print(f"{'-'*64}")
+
+    C_GME: dict[int, np.ndarray] = {n: np.full(Nn, np.nan) for n in n_values}
+    purity_dict: dict[int, np.ndarray] = {n: np.full(Nn, np.nan) for n in n_values}
+    entropy_dict: dict[int, np.ndarray] = {n: np.full(Nn, np.nan) for n in n_values}
+    rank_dict: dict[int, np.ndarray] = {n: np.full(Nn, -1, dtype=int) for n in n_values}
+    convergence: dict[int, list] = {n: [None] * Nn for n in n_values}
+    singlet_idx: np.ndarray = np.full(Nn, -1, dtype=int)
+    singlet_energy: np.ndarray = np.full(Nn, np.nan)
+    C_exact: np.ndarray = np.full(Nn, np.nan)
+    C_wootters_n2: np.ndarray = np.full(Nn, np.nan)
+    C_analytical_n2: np.ndarray = np.full(Nn, np.nan)
+    tag = "C_GCG" if solver == "gcg" else "C_LB"
+
+    for i, Ne in enumerate(N_values):
+        n_max_i = min(L, Ne)                        # largest valid cluster at this N
+        if verbose:
+            print(f"\n  N={Ne}  (n up to {n_max_i}) ...", flush=True)
+
+        energies, eigvecs, n_so = compute_all_eigenstates(
+            L, t, U, mode, Ne, spin_preserving=spin_preserving, V=V,
+            classify_spin=(verbose and not excited_singlet), classify_k=singlet_k,
+        )
+        if excited_singlet:
+            # Odd Ne has no singlet at all; skip (leave NaN) rather than crash.
+            try:
+                info = find_first_excited_singlet(
+                    L=L, t=t, U=float(U), V=V, mode=mode,
+                    n_electrons=Ne, k=singlet_k, spin_preserving=spin_preserving,
+                )
+            except Exception as ex:
+                if verbose:
+                    print(f"    [skip] no excited singlet for N={Ne}: {ex}")
+                continue
+            E0 = float(info["energy"])
+            psi0 = np.asarray(info["psi"])
+            singlet_idx[i] = int(info["idx"])
+            singlet_energy[i] = E0
+            if verbose:
+                print(f"    first excited singlet: idx={info['idx']}  "
+                      f"E={E0:.8f}", flush=True)
+        else:
+            E0 = energies[0]
+            psi0 = eigvecs[:, 0]
+
+        degen = np.where(np.abs(energies - E0) < 1e-10)[0]
+        if len(degen) > 1 and verbose:
+            print(f"    [WARN] {len(degen)}-fold degenerate {_state} "
+                  f"(averaging the manifold)")
+
+        for n in n_values:
+            if n > n_max_i:                         # nBRDM undefined for n > Ne
+                continue
+            sites = tuple(range(n))
+            ops = _precompute_ops(sites, n_so, Ne,
+                                  spin_preserving=spin_preserving)
+
+            if len(degen) <= 1:
+                rho_raw = _rdm_from_ops(ops, psi0, n)
+            else:
+                dim = 2 ** n
+                rho_raw = np.zeros((dim, dim), dtype=complex)
+                for d_idx in degen:
+                    rho_raw += _rdm_from_ops(ops, eigvecs[:, d_idx], n)
+                rho_raw /= len(degen)
+
+            tr = np.real(np.trace(rho_raw))
+            rho = rho_raw / tr if abs(tr) > 1e-14 else rho_raw
+
+            c_val, pur, _detail = compute_gme(
+                rho, n,
+                solver=solver, n_restarts=n_restarts,
+                max_iter=max_iter, tol=tol, k_max_extra=k_max_extra,
+            )
+            C_GME[n][i] = c_val
+            purity_dict[n][i] = pur
+            entropy_dict[n][i] = float(compute_entropy(rho))
+            rank_dict[n][i] = int(np.sum(np.real(np.linalg.eigvalsh(rho)) > 1e-10))
+            convergence[n][i] = _detail
+
+            if n == n_max_i and compute_purity(rho) > 1.0 - 1e-6:
+                # pure formula valid only for a pure RDM (same check as compute_gme)
+                C_exact[i] = float(compute_C_GME_pure(rho, n_max_i))
+
+            if n == 2:
+                C_analytical_n2[i] = _cgme_analytical_n2(rho)
+                C_wootters_n2[i]   = _wootters_concurrence(rho)
+
+        if verbose:
+            print("    " + "  ".join(
+                f"{tag}(n={n})={C_GME[n][i]:.4f}"
+                for n in n_values if n <= n_max_i
+            ))
+
+    # Plot
+    os.makedirs(output_dir, exist_ok=True)
+    plot_path = _nscan_plot_path()
+
+    result = {
+        "N_values":      np.asarray(N_values),
+        "C_GME":         C_GME,
+        "C_exact_nL":    C_exact,
+        "C_wootters_n2": C_wootters_n2,
+        "C_analytical_n2": C_analytical_n2,
+        "purity":        purity_dict,
+        "entropy":       entropy_dict,
+        "rank":          rank_dict,
+        "convergence":   convergence,
+        "n_values":      n_values,
+        "solver":        solver,
+        "system_info":   dict(L=L, t=t, U=U, V=V, mode=mode),
+        "excited_singlet": bool(excited_singlet),
+        "singlet_k":       int(singlet_k),
+        "singlet_idx":     singlet_idx,
+        "singlet_energy":  singlet_energy,
+        "plot_path":     plot_path,
+        "run_timestamp": ts,
+    }
+
+    plot_scan_finalized(result, plot_path, spin_preserving=spin_preserving)
+    print(f"\n    Plot -> {plot_path}")
+
+    if save_pkl or use_pkl_cache:
+        metadata = {
+            "analysis_type": "N_dependence",
+            "cache_version": cache_version,
+            "L": int(L), "t": float(t), "U": float(U), "V": float(V),
+            "mode": str(mode),
+            "n_min": int(n_min), "n_max": int(n_hi),
+            "n_values": list(n_values),
+            "N_values": list(N_values),
+            "N_digest": _array_digest(np.asarray(N_values, dtype=float)),
+            "solver": solver, "n_restarts": int(n_restarts),
+            "max_iter": int(max_iter), "tol": float(tol),
+            "k_max_extra": int(k_max_extra),
+            "excited_singlet": bool(excited_singlet),
+            "plot_path": plot_path,
+            "run_timestamp": ts,
+        }
+        _save_thermal_result_pkl(
+            cache_path=cache_path, metadata=metadata, result=result
+        )
+        result["pkl_path"] = str(cache_path)
+        result["cache_path"] = str(cache_path)
+        print(f"    N-scan PKL -> {cache_path}")
 
     return result

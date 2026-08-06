@@ -210,8 +210,8 @@ def test_translation_symmetry_at_canonical_point():
             log = [c]
         else:
             res = convex_roof_stiefel(rho, n_body, n_restarts=30, verbose=False)
-            print(f"  cluster {sites}   C_GME (best) = {result['C_stiefel']:.6f}")
-            print(f"    restart values: {[f'{v:.4f}' for v in result['best_record']['restart_log']]}")
+            print(f"  cluster {sites}   C_GME (best) = {res['C_stiefel']:.6f}")
+            print(f"    restart values: {[f'{v:.4f}' for v in res['best_record']['restart_log']]}")
             c = res["C_stiefel"]
             log = res["best_record"]["restart_log"]
         cgmes.append(c)

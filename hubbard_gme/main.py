@@ -97,6 +97,7 @@ from hubbard_gme.thermal_pipeline import (
     run_t_dependence_gme,
     run_U_dependence_gme,
     run_V_dependence_gme,
+    run_Ne_dependence_gme,
     run_tT_surface_gme,
     render_surface_from_pkl,
     merge_tT_surface_pkls,
@@ -430,6 +431,15 @@ def build_parser() -> argparse.ArgumentParser:
     therm_grp.add_argument("--v-scan-steps", type=int, default=16,
                            dest="v_scan_steps", metavar="INT",
                            help="V-scan steps (default: 16)")
+    therm_grp.add_argument("--n-scan", action="store_true", dest="n_scan",
+                           help="Scan C_GME(n) vs electron number Ne at T=0, "
+                                "fixing L, U, t, V (the Ne-scan). Uses the full "
+                                "Hilbert space; degenerate manifolds are averaged. "
+                                "Set the electron counts with --n-scan-values.")
+    therm_grp.add_argument("--n-scan-values", type=int, nargs="+", default=None,
+                           dest="n_scan_values", metavar="NE",
+                           help="Electron counts to sweep for --n-scan, "
+                                "e.g. --n-scan-values 3 4 5 6 7 8")
     therm_grp.add_argument("--full-hamiltonian", action="store_true",
                            dest="full_hamiltonian",
                            help="Use complete Hamiltonian (all Sz sectors). "
@@ -945,7 +955,7 @@ def main():
     # ── Excited singlet mode ───────────────────────────────────────────────
     # Combined with --t-scan / --u-scan, --excited-singlet is a MODIFIER that
     # tells the scan which state to use, so let the scan handler take over.
-    if args.excited_singlet and not (args.t_scan or args.u_scan or args.v_scan):
+    if args.excited_singlet and not (args.t_scan or args.u_scan or args.v_scan or args.n_scan):
         n_min_es = max(2, args.min_n)
         if n_min_es > args.L:
             parser.error("--min-n cannot exceed --L for excited-singlet analysis")
@@ -1148,6 +1158,42 @@ def main():
         if result.get("pkl_path"):
             status = "loaded" if result.get("loaded_from_cache") else "saved"
             print(f"  V-scan PKL  : {result['pkl_path']} ({status})")
+        print()
+        return
+
+    if args.n_scan:
+        ns_max_iter = 300 if args.max_iter is None else args.max_iter
+        ns_tol      = 1e-9 if args.tol     is None else args.tol
+        if not args.n_scan_values:
+            parser.error("--n-scan requires --n-scan-values NE1 NE2 ... "
+                         "(electron counts to sweep)")
+        # The Ne-scan sweeps electron number, so it MUST use the full Hilbert
+        # space: odd Ne has no Sz=0 sector, and averaging the degenerate 2S+1
+        # manifold needs all Sz sectors. Forced regardless of --full-hamiltonian.
+        result = run_Ne_dependence_gme(
+            L=args.L, N_values=args.n_scan_values, t=args.t, U=args.U, V=args.V,
+            mode=args.mode,
+            n_min=max(2, args.min_n),
+            output_dir=args.output_dir,
+            output_prefix=args.output_prefix,
+            solver=args.thermal_solver,
+            n_restarts=args.n_restarts,
+            max_iter=ns_max_iter,
+            tol=ns_tol,
+            k_max_extra=args.k_max_extra,
+            verbose=True,
+            use_pkl_cache=args.use_pkl_cache,
+            cache_version=args.cache_version,
+            force_recompute=args.force_thermal_recompute,
+            save_pkl=args.save_thermal_pkl,
+            spin_preserving=False,   # full Hilbert space (required for the Ne-scan)
+            excited_singlet=args.excited_singlet,
+            singlet_k=args.singlet_k,
+        )
+        print(f"\n  Ne-scan plot : {result['plot_path']}")
+        if result.get("pkl_path"):
+            status = "loaded" if result.get("loaded_from_cache") else "saved"
+            print(f"  Ne-scan PKL  : {result['pkl_path']} ({status})")
         print()
         return
 

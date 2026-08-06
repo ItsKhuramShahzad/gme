@@ -20,8 +20,6 @@ This package implements the full pipeline from:
    excited-singlet GME, and `t`-/`U`-scans
 5. **PDF report generation** with heatmaps, metric tables, and solver provenance
 6. **Auditable PKL caching** for system states, RDMs, and convex-roof solver runs
-7. **Machine-learning surrogates** (`gme_qml/`) that detect and estimate `C_GME`
-   from RDMs, trained on the verified pipeline (see "Machine Learning" below)
 
 The theoretical foundation is based on:
 > F. Troiani, C. Angeli, A. Secchi, and S. Pittalis,
@@ -69,35 +67,7 @@ hubbard_gme/
 │       ├── molecules_data.py    # Molecule / CAS active-space database
 │       ├── molecular.py         # Molecular Hamiltonian, GS, RDMs, spin/D
 │       ├── molecular_pipeline.py# End-to-end molecular analysis
-│       ├── molecular_visualization.py
-│       │
-│       │   # Additional / auxiliary modules (see "Module Summary")
-│       ├── cvxpy_convex_roof.py     # Standalone CVXPY SDP convex-roof solver
-│       ├── convex_roof_multimethod.py  # Run/compare multiple CR solvers together
-│       ├── report_multimethod.py    # Multi-method comparison report/tables
-│       ├── multi_restart_analysis.py# Restart-statistics analysis for solvers
-│       ├── paper_result.py          # Reproduce specific published-figure results
-│       ├── molecular_localize.py    # Orbital localisation for molecular active spaces
-│       ├── molecular_pauli.py       # Pauli/qubit-operator mapping for molecules
-│       ├── molecular_surface.py     # Molecular GME surface scans
-│       ├── molecular_audit.py       # Molecular-run integrity checks
-│       ├── molecule_benzene.py      # Benzene-specific driver
-│       ├── ml_generate_ml_dataset.py# Bridge to gme_qml dataset generation
-│       ├── ml_audit_dataset.py      # ML dataset health checks
-│       │
-│       │   # Legacy / scratch (kept for reference, not part of the main API)
-│       ├── old_visualization.py
-│       └── test_gradient.py
-│
-├── gme_qml/                     # Machine-learning subproject (see "Machine Learning")
-│   ├── README.md               # ML pipeline + status
-│   ├── LITERATURE.md           # Prior work: ML for entanglement
-│   ├── ml_generate_ml_dataset.py  # Stage 1a: generate labeled records
-│   ├── ml_ingest_pkls.py       # Stage 1b: mine existing PKL caches into records
-│   ├── ml_audit_dataset.py     # Stage 2 : dataset health checks
-│   ├── train_baselines.py      # Stage 4 : classical baselines (sklearn)
-│   ├── data_for_ML*/           # Datasets (manifest.csv + records/*.npz)
-│   └── models/                 # Trained model artifacts (*.joblib) + metrics
+│       └── molecular_visualization.py
 │
 ├── scripts/
 │   ├── verify_project.py        # Verification ladder (static → smoke → cache checks)
@@ -105,118 +75,37 @@ hubbard_gme/
 │
 ├── tests/                       # pytest suite (unit + convex-roof integration)
 ├── notebooks/                   # Interactive walkthroughs
-├── docs/                        # theory.md + abstracts, .tex reports, tables, poster, PDFs
+├── docs/
 │   └── theory.md                # Concise theory reference
 ├── outputs/                     # Generated PDF/PKL reports land here
 └── results/
     └── rdm_pkl_results/         # Central PKL cache (see "Caching" below)
 ```
 
-> **Note on repository size.** The `results/` PKL cache and large data files are
-> **not** tracked on GitHub (they can reach hundreds of GB). Only source, docs,
-> configs, and PDF reports are versioned. Regenerate results locally via the CLI
-> and `--use-pkl-cache`.
-
 ---
 
-## Installation — Clone & Reuse
-
-The project lives inside the `gme` repository, in the `hubbard_gme/` subfolder.
-
-### 1. Clone
+## Installation
 
 ```bash
-git clone https://github.com/ItsKhuramShahzad/gme.git
-cd gme/hubbard_gme
+git clone <your-repo>
+cd hubbard_gme
+pip install -e .
 ```
 
-### 2. Requirements
-
-- **Python 3.11** (the conda environment pins `python=3.11.5`; `setup.py`
-  allows `>=3.9`).
-- The **complete, authoritative dependency set is `enviornment_qchem.yml`** —
-  it captures the full stack actually used for the project's runs. Prefer it
-  (Install option A) unless you only need the minimal Hubbard pipeline.
-
-Dependencies come in two tiers:
-
-**a) Minimal core** (`requirements.txt`) — enough for the **Hubbard** pipeline,
-convex-roof solvers, and tests:
-
-| Module | Purpose |
-|--------|---------|
-| `numpy` ≥ 1.24, `scipy` ≥ 1.10 | Linear algebra, eigensolvers, optimisers |
-| `pandas` ≥ 2.0 | Metric tables / DataFrames |
-| `matplotlib` ≥ 3.7 | Heatmaps and PDF reports |
-| `openfermion` ≥ 1.6 | Fermionic operators (Hubbard + molecular Hamiltonians) |
-| `jupyter`, `ipykernel` | Notebook walkthroughs (optional) |
-| `pytest`, `pytest-cov` | Test suite |
-
-**b) Full environment** (`enviornment_qchem.yml`) — the core **plus** everything
-for molecular analysis, reporting, and GPU/quantum work (not in
-`requirements.txt`):
-
-| Module(s) | Enables |
-|-----------|---------|
-| `pyscf`, `openfermionpyscf` | Molecular Hamiltonians / ground states (`main_mol.py`) |
-| `rdkit-pypi`, `pubchempy`, `py3dmol` | Molecule lookup and 3-D / structure visualisation |
-| `h5py` | Reading/writing the large `.hdf5` state files |
-| `tectonic`, `texlive-core` | LaTeX → PDF report compilation (`.tex` outputs) |
-| `cudaq`, `cudaq-solvers`, `cirq-core`, `cuquantum`/`cupy` (CUDA 12) | GPU-accelerated quantum simulation stack |
-| `sympy`, `networkx`, `tqdm`, `tabulate` | Misc. symbolic / graph / progress / table helpers |
-
-**c) Still not included in either file — install manually if needed:**
-  - `cvxpy` — only for the SDP lower bound in `convex_roof.py`
-    (`convex_roof_sdp_relaxation`). Everything else runs without it.
-  - `scikit-learn`, `joblib` — only for the machine-learning subproject
-    (`gme_qml/`, see "Machine Learning" below).
-
-### 3. Install
-
-**Option A (recommended) — reproduce the full conda environment from the yml.**
-This is the most complete and reproducible setup (Python 3.11 + the entire
-stack, including molecular and reporting tools):
+Or install dependencies only:
 
 ```bash
-conda env create -f enviornment_qchem.yml   # or enviornment.yml (general)
-conda activate qchem
-pip install -e .                            # add the hubbard_gme package (editable)
-```
-
-**Option B — minimal, pip-only (Hubbard pipeline only).** Skips molecular /
-GPU / LaTeX tooling:
-
-```bash
-pip install -e .                  # installs requirements.txt + the package
-# or, dependencies only (then run with PYTHONPATH=src, see below):
 pip install -r requirements.txt
 ```
 
-**Optional extras (not in either environment file):**
+The runs in this project use the conda `qchem` environment:
 
 ```bash
-pip install cvxpy                 # SDP lower bound
-pip install scikit-learn joblib   # gme_qml/ machine-learning baselines
+conda env create -f enviornment_qchem.yml
+conda activate qchem
 ```
 
-### 4. Run without installing
-
-If you did **not** run `pip install -e .`, prefix commands so Python can find the
-package under `src/`:
-
-```bash
-PYTHONPATH=src python main.py --L 4 --U 4.0
-```
-
-### 5. Verify the install
-
-```bash
-# quick smoke test — a tiny single-point run
-PYTHONPATH=src python main.py --L 2 --U 4.0 --min-n 2 --max-n 2
-
-# or the static verification ladder
-PYTHONPATH=src python scripts/verify_project.py --mode imports
-```
+If the package is not installed with `pip install -e .`, run with `PYTHONPATH=src`.
 
 ---
 
@@ -370,15 +259,51 @@ pure-state decomposition vectors. See `scripts/inspect_gme_pkl.py`.
 
 ## Running Tests
 
-```bash
-# Fast unit tests
-PYTHONPATH=src pytest tests/test_metrics.py tests/test_hamiltonian.py \
-    tests/test_rdm.py tests/test_gme.py tests/test_meyerwallach.py \
-    tests/test_verification_contract.py -q
+`tests/conftest.py` puts `src/` on `sys.path`, so **no `PYTHONPATH` is needed**
+and the package need not be installed. Full details: [`tests/README_TESTS.md`](tests/README_TESTS.md).
 
-# Full suite (includes slow convex-roof integration tests — minutes)
-PYTHONPATH=src pytest tests/ -q
+```bash
+cd ~/PhDWork/hubbard_gme
+conda activate qchem
+
+# Everyday run — fast suite (~3 min, 100 tests; skips slow integration modules)
+python -m pytest tests/ -q \
+    --ignore=tests/test_canonical_parameters.py \
+    --ignore=tests/test_convex_roof.py \
+    --ignore=tests/test_mixed_states.py
+
+# Quick check (~5 s, 19 tests)
+python -m pytest tests/test_gcg_transport.py tests/test_separable_boundary.py \
+                 tests/test_meyerwallach.py tests/test_measure_param.py -q
+
+# Everything, including the slow convex-roof integration tests (hours)
+python -m pytest tests/ -q
 ```
+
+Or use the helper script (same four modes):
+
+```bash
+./tests/run_tests.sh            # fast   (default)
+./tests/run_tests.sh quick      # ~5 s
+./tests/run_tests.sh audit      # 2026 code-review tests
+./tests/run_tests.sh all        # everything, slow
+./tests/run_tests.sh bench real # before/after transport benchmark
+```
+
+Tests added for the 2026 code review:
+
+```bash
+python -m pytest tests/test_gcg_transport.py -q       # #5 parallel transport (body coords)
+python -m pytest tests/test_separable_boundary.py -q  # #6 gradient as C -> 0
+python -m pytest tests/test_gradient.py -q            # gradient A–F (~3 min)
+python -m pytest tests/test_measure_param.py -q       # #1 measure propagation
+
+# Before/after benchmark for the transport fix (not a pytest test)
+python tests/test_gcg_transport_benchmark.py --which real
+```
+
+Note: `pytest.ini` promotes `PytestReturnNotNoneWarning` to an error, so a test
+that `return`s a bool instead of asserting now fails loudly (audit issue #2).
 
 Verification ladder:
 
@@ -421,40 +346,6 @@ python scripts/verify_project.py --mode all      --cache-version v1
 | `pipeline` | `run_pure_analysis`, `run_full_GME_pipeline`, `run_scan_pipeline` |
 | `molecular*` | Molecular Hamiltonian, RDMs, convex roof, PDF reports |
 | `utils` | Basis labels, eigenvector probability plots |
-| `cvxpy_convex_roof` | Standalone CVXPY SDP convex-roof solver |
-| `convex_roof_multimethod` / `report_multimethod` | Run and compare multiple CR solvers; comparison report |
-| `multi_restart_analysis` | Restart-statistics analysis for the solvers |
-| `paper_result` | Reproduce specific published-figure results |
-| `molecular_localize` / `molecular_pauli` / `molecular_surface` / `molecular_audit` / `molecule_benzene` | Molecular extensions: orbital localisation, qubit mapping, surface scans, audits, Benzene driver |
-| `ml_generate_ml_dataset` / `ml_audit_dataset` | Bridges to the `gme_qml/` ML dataset pipeline |
-| `old_visualization`, `test_gradient` | Legacy / scratch — kept for reference, not part of the main API |
-
----
-
-## Machine Learning (`gme_qml/`)
-
-The `gme_qml/` subproject trains surrogate ML models to **detect** and
-**estimate** `C_GME` directly from n-body RDMs (or features derived from them),
-avoiding the expensive GCG convex-roof computation. The physics engine stays in
-`src/hubbard_gme/`; `gme_qml/` consumes it to build datasets and train models.
-
-| Task | Type | Output | Ground truth |
-|------|------|--------|--------------|
-| **Detection** | binary classification | GME present? (`C_GME > ε`) | GCG label / LB–UB certificates |
-| **Estimation** | regression | value of `C_GME` | `C_GCG` (verified best solver) |
-
-**Requires the ML extras:** `pip install scikit-learn joblib` (plus the core stack).
-
-```bash
-cd gme_qml
-python ml_generate_ml_dataset.py     # Stage 1a: generate labeled records
-python ml_ingest_pkls.py             # Stage 1b: mine existing PKL caches (free data)
-python ml_audit_dataset.py           # Stage 2 : dataset health checks (run before training)
-python train_baselines.py            # Stage 4 : classical baselines (detection + estimation)
-```
-
-See `gme_qml/README.md` for the full pipeline and status, and
-`gme_qml/LITERATURE.md` for prior work on ML for entanglement.
 
 ---
 

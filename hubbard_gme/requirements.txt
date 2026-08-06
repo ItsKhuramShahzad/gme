@@ -6,6 +6,10 @@ matplotlib>=3.7
 
 # Quantum chemistry / fermionic operators
 openfermion>=1.6
+# molecular.py imports openfermionpyscf at module level and __init__.py imports
+# molecular eagerly, so this is required for `import hubbard_gme` to work at all.
+openfermionpyscf>=0.5
+pyscf>=2.3
 
 # Notebook support (optional but recommended)
 jupyter>=1.0

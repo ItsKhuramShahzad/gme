@@ -24,6 +24,7 @@ Run:
 """
 
 import numpy as np
+import pytest
 import sys, os
 import time
 
@@ -57,16 +58,25 @@ def test_1_default_unchanged(n=3):
 
     print(f"    Stiefel without measure arg …")
     t0 = time.time()
-    res = convex_roof_stiefel(rho, n, n_restarts=3, k_max_extra=1, verbose=False)
-    print(f"      C = {res['C_stiefel']:.6f}   measure = {res.get('measure', 'cgme')}   "
+    res_s = convex_roof_stiefel(rho, n, n_restarts=3, k_max_extra=1, verbose=False)
+    print(f"      C = {res_s['C_stiefel']:.6f}   measure = {res_s.get('measure', 'cgme')}   "
           f"time = {time.time() - t0:.1f}s")
 
     print(f"    GCG without measure arg …")
     t0 = time.time()
-    res = convex_roof_gcg(rho, n, n_restarts=3, max_iter=100, k_max_extra=1, verbose=False)
-    print(f"      C = {res['C_gcg']:.6f}   measure = {res.get('measure', 'cgme')}   "
+    res_g = convex_roof_gcg(rho, n, n_restarts=3, max_iter=100, k_max_extra=1, verbose=False)
+    print(f"      C = {res_g['C_gcg']:.6f}   measure = {res_g.get('measure', 'cgme')}   "
           f"time = {time.time() - t0:.1f}s")
     print(f"    ✓ Both ran without error using default 'cgme'")
+
+    # Enforce (audit issue #2: this used to print only).
+    assert res_s.get("measure", "cgme") == "cgme", (
+        f"Stiefel default measure changed: {res_s.get('measure')}")
+    assert res_g.get("measure", "cgme") == "cgme", (
+        f"GCG default measure changed: {res_g.get('measure')}")
+    for label, value in (("C_stiefel", res_s["C_stiefel"]), ("C_gcg", res_g["C_gcg"])):
+        assert np.isfinite(value), f"{label} is not finite: {value}"
+        assert -1e-9 <= value <= 1.0 + 1e-9, f"{label} out of range [0,1]: {value}"
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -81,18 +91,38 @@ def test_2_mw_runs(n=3):
 
     print(f"    Stiefel with measure='meyerwallach' …")
     t0 = time.time()
-    res = convex_roof_stiefel(rho, n, n_restarts=3, k_max_extra=1, verbose=False,
-                              measure="meyerwallach")
-    print(f"      γ = {res['C_stiefel']:.6f}   measure = {res['measure']}   "
+    res_s = convex_roof_stiefel(rho, n, n_restarts=3, k_max_extra=1, verbose=False,
+                                measure="meyerwallach")
+    print(f"      γ = {res_s['C_stiefel']:.6f}   measure = {res_s['measure']}   "
           f"time = {time.time() - t0:.1f}s")
 
     print(f"    GCG with measure='meyerwallach' …")
     t0 = time.time()
-    res = convex_roof_gcg(rho, n, n_restarts=3, max_iter=100, k_max_extra=1, verbose=False,
-                          measure="meyerwallach")
-    print(f"      γ = {res['C_gcg']:.6f}   measure = {res['measure']}   "
+    res_g = convex_roof_gcg(rho, n, n_restarts=3, max_iter=100, k_max_extra=1, verbose=False,
+                            measure="meyerwallach")
+    print(f"      γ = {res_g['C_gcg']:.6f}   measure = {res_g['measure']}   "
           f"time = {time.time() - t0:.1f}s")
     print(f"    ✓ Both ran with measure='meyerwallach'")
+
+    # Enforce (audit issue #2). The measure must be propagated, not silently
+    # replaced by the cgme default (this is exactly what audit issue #1 broke).
+    assert res_s["measure"] == "meyerwallach", (
+        f"Stiefel did not propagate the measure: {res_s['measure']}")
+    assert res_g["measure"] == "meyerwallach", (
+        f"GCG did not propagate the measure: {res_g['measure']}")
+    for label, value in (("C_stiefel", res_s["C_stiefel"]), ("C_gcg", res_g["C_gcg"])):
+        assert np.isfinite(value), f"MW {label} is not finite: {value}"
+        assert -1e-9 <= value <= 1.0 + 1e-9, f"MW {label} out of range [0,1]: {value}"
+
+    # audit #1 regression: the initial cost must use the requested measure, so
+    # history[0] of an MW run must differ from that of a cgme run.
+    h0_mw = float(res_g["best_record"]["history"][0])
+    res_cg = convex_roof_gcg(rho, n, n_restarts=3, max_iter=100, k_max_extra=1,
+                             verbose=False)
+    h0_cg = float(res_cg["best_record"]["history"][0])
+    assert abs(h0_mw - h0_cg) > 1e-9, (
+        "history[0] is identical for MW and CGME — the initial cost is "
+        f"ignoring `measure` (audit #1). MW={h0_mw:.10f} CGME={h0_cg:.10f}")
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -121,26 +151,39 @@ def test_3_pure_state(n=3):
     print(f"    Pure state γ(|ψ⟩)         = {gamma_pure:.6f}")
     print(f"    Pure state C_GME(|ψ⟩)     = {cgme_pure:.6f}")
 
+    TOL = 1e-3
+
     # MW via Stiefel
     res = convex_roof_stiefel(rho_pure, n, n_restarts=3, k_max_extra=1, verbose=False,
                               measure="meyerwallach")
-    diff = abs(res['C_stiefel'] - gamma_pure)
+    diff_mw_stiefel = abs(res['C_stiefel'] - gamma_pure)
     print(f"    MW Stiefel convex roof    = {res['C_stiefel']:.6f}   "
-          f"diff from γ = {diff:.2e}   {'✓' if diff < 1e-3 else '✗'}")
+          f"diff from γ = {diff_mw_stiefel:.2e}   {'✓' if diff_mw_stiefel < TOL else '✗'}")
 
     # MW via GCG
     res = convex_roof_gcg(rho_pure, n, n_restarts=3, max_iter=100, k_max_extra=1, verbose=False,
                           measure="meyerwallach")
-    diff = abs(res['C_gcg'] - gamma_pure)
+    diff_mw_gcg = abs(res['C_gcg'] - gamma_pure)
     print(f"    MW GCG convex roof        = {res['C_gcg']:.6f}   "
-          f"diff from γ = {diff:.2e}   {'✓' if diff < 1e-3 else '✗'}")
+          f"diff from γ = {diff_mw_gcg:.2e}   {'✓' if diff_mw_gcg < TOL else '✗'}")
 
     # C_GME via Stiefel
     res = convex_roof_stiefel(rho_pure, n, n_restarts=3, k_max_extra=1, verbose=False,
                               measure="cgme")
-    diff = abs(res['C_stiefel'] - cgme_pure)
+    diff_cgme_stiefel = abs(res['C_stiefel'] - cgme_pure)
     print(f"    CGME Stiefel convex roof  = {res['C_stiefel']:.6f}   "
-          f"diff from C = {diff:.2e}   {'✓' if diff < 1e-3 else '✗'}")
+          f"diff from C = {diff_cgme_stiefel:.2e}   {'✓' if diff_cgme_stiefel < TOL else '✗'}")
+
+    # Enforce (audit issue #2): for a pure rho the only decomposition is the
+    # state itself, so the convex roof MUST reproduce the pure-state value.
+    assert diff_mw_stiefel < TOL, (
+        f"MW Stiefel roof {res['C_stiefel']:.8f} deviates from gamma_pure "
+        f"{gamma_pure:.8f} by {diff_mw_stiefel:.2e} (tol {TOL})")
+    assert diff_mw_gcg < TOL, (
+        f"MW GCG roof deviates from gamma_pure by {diff_mw_gcg:.2e} (tol {TOL})")
+    assert diff_cgme_stiefel < TOL, (
+        f"CGME Stiefel roof deviates from cgme_pure by "
+        f"{diff_cgme_stiefel:.2e} (tol {TOL})")
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -153,14 +196,17 @@ def test_4_typo_handling(n=3):
 
     rho = make_random_mixed_rho(n, rank=2, seed=42)
 
-    try:
-        res = convex_roof_stiefel(rho, n, n_restarts=1, k_max_extra=0, verbose=False,
-                                  measure="meyer_wallach")  # underscore typo
-        print(f"    ✗ Expected ValueError, got result {res['C_stiefel']}")
-    except ValueError as e:
-        print(f"    ✓ Got ValueError as expected: {e}")
-    except Exception as e:
-        print(f"    ⚠ Got unexpected exception type: {type(e).__name__}: {e}")
+    # Enforce (audit issue #2): a misspelled measure must raise, not silently
+    # fall back to a default.
+    with pytest.raises(ValueError):
+        convex_roof_stiefel(rho, n, n_restarts=1, k_max_extra=0, verbose=False,
+                            measure="meyer_wallach")  # underscore typo
+    print(f"    ✓ Got ValueError as expected for measure='meyer_wallach'")
+
+    with pytest.raises(ValueError):
+        convex_roof_gcg(rho, n, n_restarts=1, max_iter=10, k_max_extra=0,
+                        verbose=False, measure="meyer_wallach")
+    print(f"    ✓ Got ValueError as expected from the GCG path too")
 
 
 # ─────────────────────────────────────────────────────────────────────────

@@ -1078,3 +1078,26 @@
   rdmbank_v1_L6_Ne6_U7_t0p75_mode-uniform_tpall_t2all_tperpall_nmin2_sz0_clusteravg1.pkl: +30 records (L=6, t=0.75, sz0)
   rdmbank_v1_L6_Ne6_U7_t1_mode-uniform_tpall_t2all_tperpall_nmin2_full_clusteravg1.pkl: +30 records (L=6, t=1, full)
   rdmbank_v1_L6_Ne6_U7_t1_mode-uniform_tpall_t2all_tperpall_nmin2_sz0_clusteravg1.pkl: +30 records (L=6, t=1, sz0)
+  rdmbank_v1_L6_Ne6_U7_t1p5_mode-uniform_tpall_t2all_tperpall_nmin2_full_clusteravg1.pkl: +30 records (L=6, t=1.5, full)
+  rdmbank_v1_L6_Ne6_U7_t1p5_mode-uniform_tpall_t2all_tperpall_nmin2_sz0_clusteravg1.pkl: +30 records (L=6, t=1.5, sz0)
+  rdmbank_v1_L6_Ne6_U7_t2_mode-uniform_tpall_t2all_tperpall_nmin2_full_clusteravg1.pkl: +30 records (L=6, t=2, full)
+  rdmbank_v1_L6_Ne6_U7_t2_mode-uniform_tpall_t2all_tperpall_nmin2_sz0_clusteravg1.pkl: +30 records (L=6, t=2, sz0)
+  rdmbank_v1_L6_Ne6_U9_t0p25_mode-uniform_tpall_t2all_tperpall_nmin2_full_clusteravg1.pkl: +30 records (L=6, t=0.25, full)
+  rdmbank_v1_L6_Ne6_U9_t0p25_mode-uniform_tpall_t2all_tperpall_nmin2_sz0_clusteravg1.pkl: +30 records (L=6, t=0.25, sz0)
+  rdmbank_v1_L6_Ne6_U9_t0p5_mode-uniform_tpall_t2all_tperpall_nmin2_full_clusteravg1.pkl: +30 records (L=6, t=0.5, full)
+  rdmbank_v1_L6_Ne6_U9_t0p5_mode-uniform_tpall_t2all_tperpall_nmin2_sz0_clusteravg1.pkl: +30 records (L=6, t=0.5, sz0)
+  rdmbank_v1_L6_Ne6_U9_t0p75_mode-uniform_tpall_t2all_tperpall_nmin2_full_clusteravg1.pkl: +30 records (L=6, t=0.75, full)
+  rdmbank_v1_L6_Ne6_U9_t0p75_mode-uniform_tpall_t2all_tperpall_nmin2_sz0_clusteravg1.pkl: +30 records (L=6, t=0.75, sz0)
+  rdmbank_v1_L6_Ne6_U9_t1_mode-uniform_tpall_t2all_tperpall_nmin2_full_clusteravg1.pkl: +30 records (L=6, t=1, full)
+  rdmbank_v1_L6_Ne6_U9_t1_mode-uniform_tpall_t2all_tperpall_nmin2_sz0_clusteravg1.pkl: +30 records (L=6, t=1, sz0)
+  rdmbank_v1_L6_Ne6_U9_t1p5_mode-uniform_tpall_t2all_tperpall_nmin2_full_clusteravg1.pkl: +30 records (L=6, t=1.5, full)
+  rdmbank_v1_L6_Ne6_U9_t1p5_mode-uniform_tpall_t2all_tperpall_nmin2_sz0_clusteravg1.pkl: +30 records (L=6, t=1.5, sz0)
+  rdmbank_v1_L6_Ne6_U9_t2_mode-uniform_tpall_t2all_tperpall_nmin2_full_clusteravg1.pkl: +30 records (L=6, t=2, full)
+  rdmbank_v1_L6_Ne6_U9_t2_mode-uniform_tpall_t2all_tperpall_nmin2_sz0_clusteravg1.pkl: +30 records (L=6, t=2, sz0)
+[banks] generated 5184 new records
+
+  labelled 5184 NEW records (total now 10860)
+  records   → /home/khuram/Dropbox/PhDWork/hubbard_gme/gme_qml/data_for_ML_v2/ingested/records
+  manifest  → /home/khuram/Dropbox/PhDWork/hubbard_gme/gme_qml/data_for_ML_v2/ingested/manifest.csv
+  convergence sidecars → /home/khuram/Dropbox/PhDWork/hubbard_gme/gme_qml/data_for_ML_v2/ingested/convergence
+

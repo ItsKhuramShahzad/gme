@@ -78,7 +78,8 @@ def test_A_value(n=3, n_trials=10):
               f"diff = {diff:.2e}   {'✓' if ok else '✗'}")
 
     print(f"  Passed: {n_pass}/{n_trials}")
-    return n_pass == n_trials
+    assert n_pass == n_trials, (
+        f"MW value/gradient check failed in {n_trials - n_pass}/{n_trials} trials")
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -126,7 +127,8 @@ def test_B_gradient(n=3, n_trials=5, eps=1e-6):
               f"rel = {rel:.2e}   {'✓' if ok else '✗'}")
 
     print(f"  Passed: {n_pass}/{n_trials}")
-    return n_pass == n_trials
+    assert n_pass == n_trials, (
+        f"MW value/gradient check failed in {n_trials - n_pass}/{n_trials} trials")
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -170,6 +172,16 @@ def test_C_known_states():
     expected_bell = 2 / 3
     print(f"    Bell ⊗ |0>:    γ = {gamma_bell:.6f}   (expected {expected_bell:.6f})   "
           f"{'✓' if abs(gamma_bell - expected_bell) < 1e-10 else '✗'}")
+
+    # Enforce the analytic values (audit issue #2: this used to print only).
+    assert abs(gamma_ghz - 1.0) < 1e-10, (
+        f"gamma(GHZ_3) = {gamma_ghz:.12f}, expected 1.0")
+    assert abs(gamma_w - expected_w) < 1e-10, (
+        f"gamma(W_3) = {gamma_w:.12f}, expected {expected_w:.12f}")
+    assert abs(gamma_prod) < 1e-10, (
+        f"gamma(|000>) = {gamma_prod:.12f}, expected 0.0")
+    assert abs(gamma_bell - expected_bell) < 1e-10, (
+        f"gamma(Bell x |0>) = {gamma_bell:.12f}, expected {expected_bell:.12f}")
 
 
 # ─────────────────────────────────────────────────────────────────────────

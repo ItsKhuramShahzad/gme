@@ -12,61 +12,25 @@ The true definition is the convex roof:
 
 minimised over ALL pure-state decompositions  ρ = Σᵢ pᵢ |ψᵢ⟩⟨ψᵢ|.
 
-This module implements several complementary bounds and full convex-roof
-minimisers. Bounds bracket C_GME(ρ); the minimisers estimate it directly by
-optimising Σᵢ pᵢ·m(|ψᵢ⟩) over pure-state decompositions.
-
-BOUNDS
+This module implements FOUR complementary bounds and methods:
   1. Lower bound (paper)      — Coherence witness I_{x,y}(ρ)
-                                  → convex_roof_lower_bound
-  2. Lower bound (supervisor) — Optimise over (z1,z2) pairs via eqs.(6-9)
-                                  → convex_roof_lower_bound_supervisor
-  3. Lower bound (SDP)        — CVXPY SDP relaxation (optional; needs cvxpy)
-                                  → convex_roof_sdp_relaxation
-  4. Upper bound              — Eigendecomposition ρ = Σλᵢ|φᵢ⟩⟨φᵢ|
-                                  → convex_roof_upper_bound
-
-CONVEX-ROOF MINIMISERS (minimise over the decomposition manifold)
-  5. Unitary exp(iH), scipy  — L-BFGS-B / DE over U = exp(iH)
-                                  → convex_roof_numerical   (key: C_expo)
-                                  (legacy Cayley-transform variant:
-                                   unitary_convex_roof,      key: C_cayl)
-  6. Algorithm B — Stiefel   — Euler–Hurwitz angles on St(k,r), scipy
-                                minimisers (L-BFGS-B/Powell/SLSQP/TNC/…),
-                                outer loop over cardinality k
-                                  → convex_roof_stiefel      (key: C_stiefel)
-  7. Algorithm A — GCG       — Generalised Conjugate Gradient on U(k) with
-                                closed-form Riemannian gradient, parallel
-                                transport, modified Polak–Ribière
-                                  → convex_roof_gcg          (key: C_gcg)
-  8. Hybrid — Stiefel + GCG  — Riemannian CG directly on St(k,r) (QR
-                                retraction, minimal 2kr−r² parametrisation)
-                                  → convex_roof_stiefel_gcg  (key: C_stiefel_gcg)
-
-Algorithms A and B follow Rothlisberger, Lehmann & Loss, Phys. Rev. A 80,
-042301 (2009).
-
-MEASURES
-  The minimisers optimise a pluggable pure-state measure selected via the
-  `measure=` argument (see the MEASURES registry / _resolve_measure):
-    "cgme"         — genuine multipartite entanglement C_GME  (default)
-    "meyerwallach" — Meyer–Wallach global entanglement γ
+  2. Lower bound (supervisor) — Optimize over (z1,z2) pairs via eqs.(6-9)
+  3. Upper bound              — Eigendecomposition ρ = Σλᵢ|φᵢ⟩⟨φᵢ|
+  4. Numerical (exact)        — Unitary optimization via scipy
+  5. CVXPY SDP relaxation     — SDP lower bound (when cvxpy available)
 
 USAGE EXAMPLES
 --------------
-# For mixed states (n < N) — the unified entry point runs the three manifold
-# solvers (stiefel, gcg, stiefel_gcg) plus the bounds.
+# For mixed states (n < N)
 result = full_convex_roof_analysis(rho, sites=(0,1,2), n_restarts=20)
-C_lower = result['C_LB_best']      # best lower bound (paper vs supervisor)
-C_upper = result['C_UB']           # eigendecomposition upper bound
-C_est   = result['C_stiefel']      # convex-roof estimate
-                                   # (also result['C_gcg'], result['C_stiefel_gcg'])
+C_LB = result['C_LB_best']
+C_num = result['C_numerical']
 
 # For pure states (n = N) — use direct C_GME formula
 from .gme import compute_C_GME_pure
 C_exact = compute_C_GME_pure(rho, n)
 
-# Backward-compatible alias for full_convex_roof_analysis
+# All-in-one analysis
 result = convex_roof_analysis_complete(rho, sites, use_cvxpy=True)
 """
 
@@ -78,7 +42,6 @@ import time
 import hashlib
 import numpy as np
 from scipy.linalg import expm
-from scipy.optimize import minimize, differential_evolution
 from typing import Dict, List, Optional, Tuple
 from scipy.optimize import minimize, minimize_scalar, differential_evolution
 from .gme import (
@@ -90,6 +53,24 @@ from .gme import (
 )
 from scipy.optimize import minimize as sp_minimize
 N_STARTS = 200
+
+# ── Near-tie policy (audit issue #7) ─────────────────────────────────────────
+# C_GME = sqrt(2(1 - P_max)) is a max over bipartitions, so it is nonsmooth
+# wherever several bipartitions tie for the maximum purity. Two decisions must
+# be made, and they are deliberately SEPARATE:
+#
+#   VALUE policy    : the measure value is the EXACT maximum purity. We do not
+#                     average purities into the value — averaging would replace
+#                     the measure by a nearby different one, and the effect is
+#                     amplified near C = 0 because C = sqrt(2(1-P)).
+#   GRADIENT policy : at a tie the classical derivative does not exist, so we
+#                     use the averaged Clarke subgradient over the active set
+#                     (all bipartitions within TIE_TOL of the maximum).
+#
+# One shared tolerance defines "active" for both, so the solvers cannot drift
+# apart. See tests/test_tie_policy.py.
+TIE_TOL = 1e-10
+
 # ── Helper functions ───────────────────────────────────────────────────
 
 def compute_lower_bounds(rho, n):
@@ -142,8 +123,9 @@ def unitary_convex_roof(rho, n, n_starts=N_STARTS):
     best_C = np.inf
     best_params = None
     for start in range(n_starts):
-        np.random.seed(start)
-        A0 = np.random.randn(rank, rank) * 0.3
+        # audit #9: local Generator, no global RNG mutation (still deterministic)
+        _rng = np.random.default_rng(start)
+        A0 = _rng.standard_normal((rank, rank)) * 0.3
         params0 = (A0 - A0.T).flatten()
         res = sp_minimize(cost, params0, method="L-BFGS-B",
                           options={"maxiter": 300, "ftol": 1e-13})
@@ -185,18 +167,24 @@ def _cgme_pure_vector(psi, n):
             max_purity = pur_A
     return float(np.sqrt(max(0.0, 2.0 * (1.0 - max_purity))))
 
-def _cgme_pure_vector_robust(psi, n, tie_tol=1e-9):
+def _cgme_pure_vector_robust(psi, n, tie_tol=TIE_TOL):
     """
-    Robust C_GME computation that averages purities over tied bipartitions.
-    
-    For numerical stability across permutations/rotations of the input state,
-    when multiple bipartitions give purities within `tie_tol` of the maximum,
-    we average them. This kills the argmax flipping that would otherwise
-    amplify ~1e-12 noise into ~1e-4 C_GME differences.
-    
-    Note: this returns the same C_GME value (to ~1e-12) for any state
-    that's a permutation or unitary equivalent of another, assuming the
-    bipartitions list is closed under that symmetry.
+    C_GME of a pure state, evaluated under the shared near-tie VALUE policy.
+
+    The value is the EXACT maximum purity over bipartitions (audit issue #7).
+    Earlier revisions averaged the purities of all bipartitions within
+    ``tie_tol`` of the maximum; that made this function disagree with the
+    gradient-side routine, which keeps the strict maximum. Because
+    C = sqrt(2(1-P)), a small purity perturbation is amplified near C = 0, so
+    the two solvers could evaluate slightly different objectives exactly where
+    it matters most.
+
+    Tie handling now lives entirely in the GRADIENT (an averaged Clarke
+    subgradient over the active set) — see ``_cgme_pure_with_grad`` and the
+    TIE_TOL note at the top of this module.
+
+    ``tie_tol`` is retained for API compatibility and is used only to report
+    how many bipartitions are active; it no longer changes the returned value.
     """
     psi_tensor = psi.reshape([2] * n)
     purities = []
@@ -208,12 +196,9 @@ def _cgme_pure_vector_robust(psi, n, tie_tol=1e-9):
         pur_A = float(np.real(np.trace(rho_A @ rho_A)))
         purities.append(pur_A)
     
+    # VALUE policy: exact maximum (no averaging) — see TIE_TOL note above.
     max_p = max(purities)
-    # Average all purities within tie_tol of the maximum
-    tied = [p for p in purities if (max_p - p) < tie_tol]
-    effective_max = sum(tied) / len(tied)
-    
-    return float(np.sqrt(max(0.0, 2.0 * (1.0 - effective_max))))
+    return float(np.sqrt(max(0.0, 2.0 * (1.0 - max_p))))
 def _cgme_pure_dm(rho_pure: np.ndarray, n: int) -> float:
     """C_GME for a pure state given as density matrix."""
     purities = [purity(partial_trace_spins(rho_pure, n, A))
@@ -433,10 +418,12 @@ def convex_roof_lower_bound(rho: np.ndarray, n: int) -> Dict:
     best_x = strings[0]
     best_y = strings[-1]
 
+    n_pairs_checked = 0
     for xi in range(dim):
         for yi in range(dim):
             if xi == yi:
                 continue
+            n_pairs_checked += 1
             I = I_function(rho, n, strings[xi], strings[yi])
             if I > best_I:
                 best_I = I
@@ -448,6 +435,8 @@ def convex_roof_lower_bound(rho: np.ndarray, n: int) -> Dict:
         "best_I":  float(best_I),
         "best_x":  best_x,
         "best_y":  best_y,
+        # documented in the docstring but previously not returned
+        "n_pairs_checked": int(n_pairs_checked),
         "method":  "paper_witness",
     }
 
@@ -1039,20 +1028,23 @@ def convex_roof_stiefel(
         record["elapsed_seconds"] = float(time.perf_counter() - _k_t0)
         k_records.append(record)
         current_C = record["C_GME"]
-        k_history.append(current_C) 
+        k_history.append(current_C)
+        # The convex roof is a MINIMUM over k, and each k is an independent
+        # stochastic search: a later k can land on a worse local minimum.
+        # Keep the best record seen, not the last one evaluated.
+        if not best_record or current_C < best_record["C_GME"]:
+            best_record = record
         if verbose:
             delta = abs(current_C - prev_C)
             print(f"C_GME = {current_C:.8f}  delta = {delta:.2e}")
- 
+
         # convergence check — need at least one previous value
         if extra > 0 and abs(current_C - prev_C) < tol_k:
             if verbose:
                 print(f"    Converged at k = {k}")
-            best_record = record
             break
- 
+
         prev_C      = current_C
-        best_record = record
  
     else:
         if verbose:
@@ -1108,20 +1100,25 @@ def convex_roof_stiefel(
 #   2. Gradient ∂h/∂Re U, ∂h/∂Im U       ← Eqs. (10–11) of the paper
 #   3. Skew-Hermitian gradient G(U)     ← Eqs. (22, 23, 26)
 #   4. Geodesic step U → U exp(t X)     ← line search via Brent's method
-#   5. Parallel transport               ← T = exp(tX/2) G_old exp(-tX/2)
+#   5. Parallel transport               ← T = exp(-tX/2) G_old exp(+tX/2)
+#      (body/left-trivialized coordinates; see the note in _gcg_optimise_single)
 #   6. Modified Polak-Ribière           ← γ = ⟨G_new − T, G_new⟩ / ⟨G_old, G_old⟩
 # ══════════════════════════════════════════════════════════════════════════════
 
 
 def _cgme_pure_with_grad(psi: np.ndarray, n: int,
-                         tie_tol: float = 1e-10) -> tuple:
+                         tie_tol: float = TIE_TOL) -> tuple:
     """
     Compute C_GME(|psi>) and a Clarke subgradient w.r.t. psi*.
 
-    When several bipartitions tie for max purity (within tie_tol),
-    return the *averaged* subgradient over the active set. This is
-    the centroid of the Clarke subdifferential and gives smooth
-    behaviour through symmetric states (GHZ, W, etc.).
+    Near-tie policy (audit issue #7), shared with ``_cgme_pure_vector_robust``
+    through the module-level ``TIE_TOL``:
+
+    * VALUE    — the exact maximum purity; no averaging.
+    * GRADIENT — the averaged Clarke subgradient over the active set (all
+      bipartitions within ``tie_tol`` of the maximum). This is the centroid of
+      the Clarke subdifferential and gives smooth behaviour through symmetric
+      states (GHZ, W, ...), where the classical derivative does not exist.
     """
     psi_tensor = psi.reshape([2] * n)
     biparts    = get_bipartitions(n)
@@ -1144,6 +1141,22 @@ def _cgme_pure_with_grad(psi: np.ndarray, n: int,
 
     # ---- C_GME (depends only on max_purity, not on the active set size) ----
     C      = float(np.sqrt(max(0.0, 2.0 * (1.0 - max_purity))))
+    # C = sqrt(2(1-P_max)) has a square-root cusp at C = 0 (separable states):
+    # dC/dpsi* = -(1/C) dP_max/dpsi*, so the RAW gradient below diverges like
+    # 1/C. The floor keeps it finite; it does NOT make C differentiable there.
+    #
+    # This is safe in practice because the divergence does not reach the
+    # optimizer: _gcg_gradient multiplies this by the component probabilities,
+    # sums over the k components and contracts with U, and the 1/C factor
+    # cancels. Measured on |000> + eps|111> (see tests/test_separable_boundary.py):
+    #
+    #     C = 1.98e-01 -> ||grad_conj|| = 9.95e+00 , ||G|| = 2.18e-03
+    #     C = 2.00e-05 -> ||grad_conj|| = 1.00e+05 , ||G|| = 1.30e-02
+    #     C = 0        -> ||grad_conj|| = 2.00e+10 , ||G|| = 1.50e-02
+    #
+    # i.e. the final tangent gradient stays O(1e-2) while the raw one reaches
+    # 2e10. test_separable_boundary.py asserts ||G|| < 1 so a future refactor
+    # cannot silently break that cancellation.
     C_safe = max(C, 1e-10)
 
     # ---- Averaged Wirtinger subgradient over the active bipartitions ----
@@ -1328,11 +1341,14 @@ def _gcg_optimise_single(
         history      : list of cost values per iteration
         converged    : whether tol was reached
     """
-    if seed is not None:
-        np.random.seed(seed)
+    # Audit issue #9: use a LOCAL Generator instead of np.random.seed(), which
+    # mutates global RNG state and can silently perturb unrelated callers.
+    # Behaviour is still fully reproducible via `seed`, which is echoed back in
+    # the returned dict so the effective stream is recorded.
+    rng = np.random.default_rng(seed)
 
     # Random starting point: random Hermitian matrix → exp(iH) gives a unitary
-    H0 = np.random.randn(k, k) + 1j * np.random.randn(k, k)
+    H0 = rng.standard_normal((k, k)) + 1j * rng.standard_normal((k, k))
     H0 = 0.5 * (H0 + H0.conj().T)
     U = expm(1j * H0)
 
@@ -1340,9 +1356,19 @@ def _gcg_optimise_single(
     G = _gcg_gradient(U, eigvecs, eigvals_sqrt, n, measure)
     X = -G                                # initial direction is steepest descent
 
-    h_curr = _h_full_unitary(U, eigvecs, eigvals_sqrt, n)
+    # Must use the caller's measure: the gradient and every line-search
+    # evaluation below use `measure`, so defaulting to cgme here would mix two
+    # objectives (wrong history[0] and a wrong first accept/reject comparison).
+    h_curr = _h_full_unitary(U, eigvecs, eigvals_sqrt, n, measure=measure)
     history = [h_curr]
     converged = False
+    # Audit issue #8: `converged` alone does not describe how a restart ended.
+    # Record the terminal path explicitly. Values:
+    #   "gradient_and_step_tol" — grad_norm < tol AND improvement < tol
+    #   "line_search_stalled"   — line search found no improving step
+    #   "line_search_exception" — the scalar minimiser raised
+    #   "max_iter"              — iteration budget exhausted
+    termination = "max_iter"
     last_t = 1.0                          # for warm-starting line search bracket
 
     for it in range(max_iter):
@@ -1377,9 +1403,11 @@ def _gcg_optimise_single(
                 t_new = float(res.x)
                 h_new = float(res.fun)
             except Exception:
+                termination = "line_search_exception"
                 break
             if h_new >= h_curr - 1e-15 or t_new <= 0:
                 # genuinely converged or stuck
+                termination = "line_search_stalled"
                 break
 
         # ── 2. Update U ──
@@ -1388,12 +1416,20 @@ def _gcg_optimise_single(
         # ── 3. New gradient ──
         G_new = _gcg_gradient(U_new, eigvecs, eigvals_sqrt, n, measure  )
 
-        # ── 4. Parallel transport old gradient: T = exp(tX/2) G exp(−tX/2) ──
-        # Note: Riemannian transport on the unitary group with right-invariant metric.
-        # We multiply on the left by U_new but the formula in the paper uses left
-        # action of exp(tX/2) only — keep it as written.
+        # ── 4. Parallel transport old gradient: T = exp(−tX/2) G exp(+tX/2) ──
+        # The step is U_new = U @ expm(tX), so X and G are expressed in
+        # BODY (left-trivialized) coordinates — verified numerically: the
+        # identity d/dt h(U exp(tY))|_0 = <G, Y> holds for arbitrary
+        # skew-Hermitian Y, and G is exactly skew-Hermitian.
+        #
+        # In body coordinates the parallel transport along the geodesic
+        # gamma(t) = U exp(tX) is  T(Y) = exp(−tX/2) Y exp(+tX/2).
+        # (Eq. (16) of the paper is the AMBIENT form, exp(+tX/2) Y exp(−tX/2);
+        # applying it to a body vector transports in the wrong direction and
+        # spoils conjugacy.  See tests/test_gcg_transport.py, which measures
+        # the covariant derivative: ~5e-11 for this form vs 1.75 for the other.)
         half_step = expm(0.5 * t_new * X)
-        T_transp = half_step @ G @ half_step.conj().T
+        T_transp = half_step.conj().T @ G @ half_step
 
         # ── 5. Modified Polak-Ribière coefficient ──
         denom = _gcg_inner(G, G)
@@ -1405,7 +1441,14 @@ def _gcg_optimise_single(
         gamma = max(0.0, gamma)
 
         # ── 6. New search direction ──
+        # X generates this geodesic, so it is its own parallel transport
+        # (exp(−tX/2) X exp(+tX/2) = X) and needs no correction here.
         X_new = -G_new + gamma * X
+        # Descent safeguard: PR+ clamping alone does NOT guarantee a descent
+        # direction (measured: 3/8 random trials were ascent both before and
+        # after the transport fix). Fall back to steepest descent if needed.
+        if _gcg_inner(G_new, X_new) >= 0.0:
+            X_new = -G_new
 
         # ── Convergence check ──
         grad_norm = np.sqrt(_gcg_inner(G_new, G_new))
@@ -1415,6 +1458,7 @@ def _gcg_optimise_single(
             h_curr = h_new
             history.append(h_curr)
             converged = True
+            termination = "gradient_and_step_tol"
             break
 
         # ── Step accepted ──
@@ -1429,6 +1473,9 @@ def _gcg_optimise_single(
         "n_iters":   len(history) - 1,
         "history":   history,
         "converged": converged,
+        # audit #8: precise terminal path (see the definition above)
+        "termination": termination,
+        "seed":      seed,
     }
 
 
@@ -1518,6 +1565,7 @@ def convex_roof_gcg(
         best_h = np.inf
         best_inner = None
         restart_log: List[float] = []
+        _termination_counts: Dict[str, int] = {}   # audit #8
 
         for restart in range(n_restarts_actual):
             seed = 31337 + 17 * extra + restart  # reproducible per (k, restart)
@@ -1528,6 +1576,10 @@ def convex_roof_gcg(
                     max_iter=max_iter, tol=tol, seed=seed, measure=measure
                 )
             restart_log.append(inner["h_best"])
+            # audit #8: how often each terminal path occurs across restarts,
+            # so line-search stalls vs iteration-limit exits are measurable
+            _t = inner.get("termination", "unknown")
+            _termination_counts[_t] = _termination_counts.get(_t, 0) + 1
             if inner["h_best"] < best_h:
                 best_h = inner["h_best"]
                 best_inner = inner
@@ -1553,6 +1605,9 @@ def convex_roof_gcg(
             "n_iters":     best_inner["n_iters"],
             "history":     best_inner["history"],
             "converged":   bool(best_inner.get("converged", False)),
+            # audit #8: how the winning restart actually ended
+            "termination": best_inner.get("termination"),
+            "termination_counts": _termination_counts,
             "completed_successfully": bool(np.isfinite(best_h)),
             "n_params":    k * k,
             "n_restarts":  n_restarts_actual,
@@ -1565,6 +1620,12 @@ def convex_roof_gcg(
         record["elapsed_seconds"] = float(time.perf_counter() - _k_t0)
         k_records.append(record)
 
+        # The convex roof is a MINIMUM over k, and each k is an independent
+        # stochastic search: a later k can land on a worse local minimum.
+        # Keep the best record seen, not the last one evaluated.
+        if not best_record or record["C_GME"] < best_record["C_GME"]:
+            best_record = record
+
         delta = abs(best_h - prev_C)
         if verbose:
             print(f"C_GME = {best_h:.8f}  Δ = {delta:.2e}")
@@ -1573,11 +1634,9 @@ def convex_roof_gcg(
         if extra > 0 and delta < tol_k:
             if verbose:
                 print(f"    Converged at k = {k}")
-            best_record = record
             break
 
         prev_C      = best_h
-        best_record = record
 
     else:
         if verbose:
@@ -1781,6 +1840,13 @@ def _stiefel_gcg_optimise_single(
 
     history   = [h_curr]
     converged = False
+    # Audit issue #8: `converged` alone does not describe how a restart ended.
+    # Record the terminal path explicitly. Values:
+    #   "gradient_and_step_tol" — grad_norm < tol AND improvement < tol
+    #   "line_search_stalled"   — line search found no improving step
+    #   "line_search_exception" — the scalar minimiser raised
+    #   "max_iter"              — iteration budget exhausted
+    termination = "max_iter"
     last_t    = 1.0
 
     for _ in range(max_iter):
@@ -1843,6 +1909,7 @@ def _stiefel_gcg_optimise_single(
 
         if grad_norm < tol and improvement < tol:
             converged = True
+            termination = "gradient_and_step_tol"
             break
 
     return {
@@ -1851,6 +1918,9 @@ def _stiefel_gcg_optimise_single(
         "n_iters":   len(history) - 1,
         "history":   history,
         "converged": converged,
+        # audit #8: precise terminal path (see the definition above)
+        "termination": termination,
+        "seed":      seed,
     }
 
 
@@ -1925,6 +1995,7 @@ def convex_roof_stiefel_gcg(
         best_h      = np.inf
         best_inner  = None
         restart_log: List[float] = []
+        _termination_counts: Dict[str, int] = {}   # audit #8
 
         for restart in range(n_restarts_actual):
             seed = 91011 + 17 * extra + restart       # reproducible per (k, restart)
@@ -1935,6 +2006,10 @@ def convex_roof_stiefel_gcg(
                     max_iter=max_iter, tol=tol, seed=seed, measure=measure,
                 )
             restart_log.append(inner["h_best"])
+            # audit #8: how often each terminal path occurs across restarts,
+            # so line-search stalls vs iteration-limit exits are measurable
+            _t = inner.get("termination", "unknown")
+            _termination_counts[_t] = _termination_counts.get(_t, 0) + 1
             if inner["h_best"] < best_h:
                 best_h     = inner["h_best"]
                 best_inner = inner
@@ -1959,6 +2034,9 @@ def convex_roof_stiefel_gcg(
             "n_iters":     best_inner["n_iters"],
             "history":     best_inner["history"],
             "converged":   bool(best_inner.get("converged", False)),
+            # audit #8: how the winning restart actually ended
+            "termination": best_inner.get("termination"),
+            "termination_counts": _termination_counts,
             "completed_successfully": bool(np.isfinite(best_h)),
             "n_params":    2 * k * r - r * r,
             "n_restarts":  n_restarts_actual,
@@ -1970,7 +2048,10 @@ def convex_roof_stiefel_gcg(
         }
         record["elapsed_seconds"] = float(time.perf_counter() - _k_t0)
         k_records.append(record)
+        if not best_record or record["C_GME"] < best_record["C_GME"]:
+            best_record = record
         k_history.append(float(best_h))
+        
 
         delta = abs(best_h - prev_C)
         if verbose:
@@ -1979,11 +2060,9 @@ def convex_roof_stiefel_gcg(
         if extra > 0 and delta < tol_k:
             if verbose:
                 print(f"    Converged at k = {k}")
-            best_record = record
             break
 
         prev_C      = best_h
-        best_record = record
     else:
         if verbose:
             print(f"    [Stiefel-GCG] Warning: did not converge within "
@@ -2529,7 +2608,13 @@ def full_convex_roof_analysis(
     # disabled placeholder dominate C_LB_best.
     C_LB      = 0.0
     C_LB_sup  = lb_sup["C_LB"]
-    C_GME     = C_GME_pure_dm(rho, n)
+    # The pure-state formula is only valid for a PURE rho. Applying it to a
+    # mixed rho saturates at ~1.0 and is not the convex roof (use C_gcg /
+    # C_stiefel for that). Gate on purity, exactly as the solver dispatch does.
+    _purity   = float(np.real(np.trace(rho @ rho)))
+    _is_pure  = _purity > 1.0 - 1e-6
+    C_pure    = float(C_GME_pure_dm(rho, n)) if _is_pure else float("nan")
+    C_GME     = C_pure          # backward-compatible key; NaN when rho is mixed
     C_UB      = ub["C_UB"]
     C_expo    = 0.0
     C_cayl    = 0.0
@@ -2541,8 +2626,41 @@ def full_convex_roof_analysis(
         sdp_result = convex_roof_sdp_relaxation(rho, n)
         C_sdp = sdp_result.get("C_sdp")
 
-    consistent = 0
-    status = "nONE"
+    # ── Numerical convex roof, bound consistency and GME status ──────────────
+    # These three fields used to be hard-coded placeholders (`consistent = 0`,
+    # `status = "none"`) even though the docstring, the tests and downstream
+    # consumers (molecular_pipeline / *_visualization / molecular_audit) expect
+    # real values. They are computed here from quantities already in hand.
+    #
+    # C_numerical is the best (lowest) value any convex-roof solver achieved:
+    # each solver returns an UPPER bound on the true roof, so the minimum over
+    # solvers is the tightest estimate. NaNs (skipped solvers) are ignored.
+    _roof_candidates = [c for c in (C_stiefel, C_gcg, C_stiefel_gcg)
+                        if c is not None and np.isfinite(c)]
+    C_numerical = float(min(_roof_candidates)) if _roof_candidates else float("nan")
+
+    # A consistent result satisfies   C_LB_best <= C_numerical <= C_UB
+    # (tolerance absorbs solver noise). NaN => not verifiable => not consistent.
+    _tol_consist = 1e-4
+    consistent = int(
+        np.isfinite(C_numerical)
+        and (C_LB_best <= C_numerical + _tol_consist)
+        and (C_numerical <= C_UB + _tol_consist)
+    )
+
+    # GME classification:
+    #   no_GME       — the numerical roof is zero within tolerance
+    #   GME          — a certified lower bound is strictly positive
+    #   inconclusive — roof > 0 but no positive certified lower bound
+    _tol_gme = 1e-5
+    if not np.isfinite(C_numerical):
+        status = "failed"
+    elif C_numerical < _tol_gme:
+        status = "no_GME"
+    elif C_LB_best > _tol_gme:
+        status = "GME"
+    else:
+        status = "inconclusive"
 
     solver_effective_settings = {
         "stiefel": _solver_effective_settings(
@@ -2593,7 +2711,13 @@ def full_convex_roof_analysis(
         "C_LB":               float(C_LB),
         "C_LB_supervisor":    float(C_LB_sup),
         "C_LB_best":          float(C_LB_best),
+        # C_GME is retained for backward compatibility with existing PKLs and
+        # consumers, but it is the PURE-state value: it is NaN unless rho is
+        # pure. The mixed-state convex roof is C_gcg / C_stiefel.
         "C_GME":              C_GME,
+        "C_pure":             C_pure,      # NaN when rho is mixed
+        "rho_is_pure":        bool(_is_pure),
+        "rho_purity":         _purity,
         "C_expo":             float(C_expo),
         "C_cayl":             float(C_cayl),
         "C_stiefel":          float(C_stiefel),
@@ -2601,6 +2725,8 @@ def full_convex_roof_analysis(
         "C_gcg":              float(C_gcg),
         "C_UB":               float(C_UB),
         "C_sdp":              C_sdp,
+        # best (lowest) numerical convex roof over the solvers that ran
+        "C_numerical":        float(C_numerical),
         "bounds_consistent":  consistent,
         "status":             status,
         "stiefel":            stiefel,
