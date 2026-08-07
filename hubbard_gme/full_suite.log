@@ -1,0 +1,335 @@
+==> FULL suite, including slow real-optimisation tests (can take hours)
+============================= test session starts ==============================
+platform linux -- Python 3.11.5, pytest-8.4.1, pluggy-1.6.0 -- /home/khuram/miniconda3/envs/qchem/bin/python
+cachedir: .pytest_cache
+rootdir: /home/khuram/Dropbox/PhDWork/hubbard_gme
+configfile: pytest.ini
+plugins: cov-7.1.0, anyio-4.13.0
+collecting ... collected 142 items
+
+tests/test_canonical_parameters.py::test_sanity_a_Ut_monotonicity 
+=== Sanity (a): U/t monotonicity at L=6 ===
+  cluster (0, 1, 2)   C_GME (best) = 0.000011
+    restart values: ['0.0000', '0.0097', '0.0044', '0.0217', '0.0028', '0.0000', '0.0056', '0.0232', '0.0151', '0.0292']
+  U/t =   1.0   purity = 0.2646   C_GME = 0.000011   E0/site = -1.1002   (177.9s)
+  cluster (0, 1, 2)   C_GME (best) = 0.022499
+    restart values: ['0.0754', '0.0225', '0.0225', '0.0779', '0.0756', '0.0225', '0.0225', '0.0813', '0.0225', '0.0746']
+  U/t =   4.0   purity = 0.3593   C_GME = 0.022499   E0/site = -0.6115   (31.4s)
+  cluster (0, 1, 2)   C_GME (best) = 0.329003
+    restart values: ['0.3438', '0.3438', '0.3438', '0.3290', '0.3438', '0.3438', '0.3290', '0.3438', '0.3290', '0.3438']
+  U/t =  16.0   purity = 0.4395   C_GME = 0.329003   E0/site = -0.1767   (43.0s)
+  → saved /home/khuram/Dropbox/PhDWork/hubbard_gme/tests/outputs/sanity_a_Ut_monotonicity.json
+PASSED
+tests/test_canonical_parameters.py::test_sanity_b_L_size_consistency 
+=== Sanity (b): L size consistency at U/t = 4 ===
+  cluster (0, 1)   C_GME (best) = 0.381767
+    restart values: ['0.3818', '0.3818', '0.3818', '0.3818', '0.3818', '0.3818', '0.3818', '0.3818', '0.3818', '0.3818']
+  cluster (0, 1, 2)   C_GME (best) = 0.022499
+    restart values: ['0.0225', '0.0770', '0.0754', '0.0793', '0.0225', '0.0745', '0.0225', '0.0754', '0.0225', '0.0225']
+  L=4, n=2 (half-ring):   purity=0.5092  C_GME=0.3818  E0/site=-0.5257
+  L=6, n=3 (half-ring):   purity=0.3593  C_GME=0.0225  E0/site=-0.6115
+  → |E0/site| relative diff = 14.0%
+  → |C_GME| half-system diff = 0.3593  (reported, not asserted)
+PASSED
+tests/test_canonical_parameters.py::test_translation_symmetry_at_canonical_point 
+=== Translation symmetry at L=6, U=4, n=3 ===
+  cluster (0, 1, 2)   C_GME (best) = 0.022499
+    restart values: ['0.0783', '0.1055', '0.0766', '0.0225', '0.0225', '0.0225', '0.0225', '0.0225', '0.0776', '0.0748', '0.0877', '0.0800', '0.0225', '0.0804', '0.0762', '0.0225', '0.0800', '0.0763', '0.0225', '0.0225', '0.0756', '0.0791', '0.0772', '0.0808', '0.0923', '0.0225', '0.0798', '0.0225', '0.0225', '0.0777']
+  cluster (0, 1, 2)   C_GME (best of 30 restarts) = 0.022499   min in log = 0.022499   max in log = 0.105477
+  cluster (1, 2, 3)   C_GME (best) = 0.022499
+    restart values: ['0.0764', '0.0225', '0.0935', '0.0801', '0.0225', '0.0225', '0.1035', '0.0742', '0.0800', '0.0225', '0.0796', '0.0925', '0.0759', '0.0225', '0.0225', '0.0225', '0.0749', '0.0738', '0.0225', '0.0225', '0.0225', '0.0225', '0.0808', '0.0994', '0.0225', '0.0225', '0.0913', '0.0797', '0.0225', '0.0225']
+  cluster (1, 2, 3)   C_GME (best of 30 restarts) = 0.022499   min in log = 0.022499   max in log = 0.103453
+  cluster (2, 3, 4)   C_GME (best) = 0.022499
+    restart values: ['0.0758', '0.0778', '0.0225', '0.0225', '0.0225', '0.0752', '0.0225', '0.0779', '0.0225', '0.0800', '0.0225', '0.0801', '0.0745', '0.0225', '0.0738', '0.0225', '0.0991', '0.0225', '0.0225', '0.0225', '0.0739', '0.0225', '0.0766', '0.0825', '0.0803', '0.0748', '0.0225', '0.0769', '0.0835', '0.0753']
+  cluster (2, 3, 4)   C_GME (best of 30 restarts) = 0.022499   min in log = 0.022499   max in log = 0.099110
+  cluster (3, 4, 5)   C_GME (best) = 0.022499
+    restart values: ['0.0748', '0.0225', '0.0774', '0.0759', '0.0225', '0.0225', '0.0774', '0.0225', '0.0748', '0.0777', '0.0225', '0.0814', '0.0763', '0.0225', '0.0225', '0.0225', '0.0787', '0.0225', '0.0809', '0.0850', '0.0225', '0.0225', '0.0225', '0.0744', '0.0867', '0.0225', '0.0225', '0.0781', '0.0225', '0.0225']
+  cluster (3, 4, 5)   C_GME (best of 30 restarts) = 0.022499   min in log = 0.022499   max in log = 0.086733
+  cluster (4, 5, 0)   C_GME (best) = 0.022499
+    restart values: ['0.0995', '0.0225', '0.0853', '0.0225', '0.0225', '0.0225', '0.0757', '0.0225', '0.0751', '0.0802', '0.0779', '0.0990', '0.0756', '0.0225', '0.0778', '0.0225', '0.0225', '0.0225', '0.0225', '0.0225', '0.0225', '0.0751', '0.0748', '0.0791', '0.0846', '0.0774', '0.0225', '0.0835', '0.0225', '0.1241']
+  cluster (4, 5, 0)   C_GME (best of 30 restarts) = 0.022499   min in log = 0.022499   max in log = 0.124078
+  cluster (5, 0, 1)   C_GME (best) = 0.022499
+    restart values: ['0.0818', '0.0810', '0.0921', '0.0225', '0.0225', '0.0796', '0.0225', '0.0225', '0.0225', '0.0225', '0.0225', '0.0803', '0.0807', '0.0736', '0.0225', '0.0851', '0.0778', '0.0225', '0.0225', '0.0833', '0.0772', '0.0755', '0.0225', '0.0225', '0.0225', '0.0896', '0.0751', '0.0776', '0.0225', '0.0988']
+  cluster (5, 0, 1)   C_GME (best of 30 restarts) = 0.022499   min in log = 0.022499   max in log = 0.098768
+
+  Spread of best-per-cluster results: 0.0000
+  Smallest value seen across ALL restarts: 0.022499
+  → True convex roof is approximately 0.0225
+  Relative spread: 0.0% of the minimum
+PASSED
+tests/test_convex_roof.py::TestCgmePureVector::test_singlet_equals_one PASSED
+tests/test_convex_roof.py::TestCgmePureVector::test_product_equals_zero PASSED
+tests/test_convex_roof.py::TestCgmePureVector::test_matches_density_matrix_formula PASSED
+tests/test_convex_roof.py::TestCgmePureVector::test_ghz3_positive PASSED
+tests/test_convex_roof.py::TestUnitaryParam::test_is_unitary[1] PASSED
+tests/test_convex_roof.py::TestUnitaryParam::test_is_unitary[2] PASSED
+tests/test_convex_roof.py::TestUnitaryParam::test_is_unitary[3] PASSED
+tests/test_convex_roof.py::TestUnitaryParam::test_is_unitary[4] PASSED
+tests/test_convex_roof.py::TestUnitaryParam::test_identity_from_zero_params PASSED
+tests/test_convex_roof.py::TestDecompose::test_probabilities_sum_to_one PASSED
+tests/test_convex_roof.py::TestDecompose::test_reconstruction_correct PASSED
+tests/test_convex_roof.py::TestLowerBound::test_nonnegative PASSED
+tests/test_convex_roof.py::TestLowerBound::test_zero_for_maximally_mixed PASSED
+tests/test_convex_roof.py::TestLowerBound::test_positive_for_entangled_mixture PASSED
+tests/test_convex_roof.py::TestLowerBound::test_returns_required_keys PASSED
+tests/test_convex_roof.py::TestLowerBound::test_pure_state_matches_cgme PASSED
+tests/test_convex_roof.py::TestUpperBound::test_nonnegative PASSED
+tests/test_convex_roof.py::TestUpperBound::test_zero_for_separable PASSED
+tests/test_convex_roof.py::TestUpperBound::test_returns_required_keys PASSED
+tests/test_convex_roof.py::TestUpperBound::test_pure_state_matches_cgme PASSED
+tests/test_convex_roof.py::TestUpperBound::test_contributions_sum_consistent PASSED
+tests/test_convex_roof.py::TestNumerical::test_nonnegative PASSED
+tests/test_convex_roof.py::TestNumerical::test_leq_upper_bound PASSED
+tests/test_convex_roof.py::TestNumerical::test_geq_lower_bound PASSED
+tests/test_convex_roof.py::TestNumerical::test_pure_state_matches_cgme PASSED
+tests/test_convex_roof.py::TestNumerical::test_separable_gives_zero PASSED
+tests/test_convex_roof.py::TestNumerical::test_returns_required_keys PASSED
+tests/test_convex_roof.py::TestFullAnalysis::test_bounds_consistent_for_singlet PASSED
+tests/test_convex_roof.py::TestFullAnalysis::test_bounds_consistent_for_mixture PASSED
+tests/test_convex_roof.py::TestFullAnalysis::test_status_gme_for_entangled PASSED
+tests/test_convex_roof.py::TestFullAnalysis::test_status_no_gme_for_separable PASSED
+tests/test_convex_roof.py::TestFullAnalysis::test_all_keys_present PASSED
+tests/test_convex_roof.py::TestFullAnalysis::test_gcg_is_exercised_and_bracketed PASSED
+tests/test_convex_roof.py::TestFullAnalysis::test_gcg_matches_pure_state_value PASSED
+tests/test_gcg_transport.py::test_gradient_is_body_coordinates PASSED
+tests/test_gcg_transport.py::test_transport_preserves_tangency PASSED
+tests/test_gcg_transport.py::test_transport_is_parallel PASSED
+tests/test_gcg_transport.py::test_generator_transports_to_itself PASSED
+tests/test_gcg_transport.py::test_search_direction_is_descent_with_safeguard PASSED
+tests/test_gme.py::TestPurity::test_pure_state PASSED
+tests/test_gme.py::TestPurity::test_maximally_mixed_two_spins PASSED
+tests/test_gme.py::TestPurity::test_is_pure_state_true PASSED
+tests/test_gme.py::TestPurity::test_is_pure_state_false PASSED
+tests/test_gme.py::TestBipartitions::test_n2_gives_one_partition PASSED
+tests/test_gme.py::TestBipartitions::test_n3_gives_three_partitions PASSED
+tests/test_gme.py::TestBipartitions::test_n4_gives_seven_partitions PASSED
+tests/test_gme.py::TestBipartitions::test_zero_always_in_A PASSED
+tests/test_gme.py::TestPartialTrace::test_trace_out_one_spin_gives_correct_shape PASSED
+tests/test_gme.py::TestPartialTrace::test_singlet_single_qubit_rdm_is_maximally_mixed PASSED
+tests/test_gme.py::TestPartialTrace::test_product_state_trace_gives_pure_rdm PASSED
+tests/test_gme.py::TestPartialTrace::test_trace_preserved PASSED
+tests/test_gme.py::TestPartialTrace::test_wrong_shape_raises PASSED
+tests/test_gme.py::TestCGME::test_singlet_cgme_is_one PASSED
+tests/test_gme.py::TestCGME::test_product_state_cgme_is_zero PASSED
+tests/test_gme.py::TestCGME::test_ghz3_cgme_positive PASSED
+tests/test_gme.py::TestCGME::test_cgme_nonnegative PASSED
+tests/test_gme.py::TestAnalyseOneRDM::test_singlet_returns_gme PASSED
+tests/test_gme.py::TestAnalyseOneRDM::test_product_state_returns_no_gme PASSED
+tests/test_gme.py::TestAnalyseOneRDM::test_mixed_state_flagged PASSED
+tests/test_gme.py::TestAnalyseOneRDM::test_c_gme_none_when_no_gme PASSED
+tests/test_gme.py::TestAnalyseOneRDM::test_c_gme_positive_when_gme PASSED
+tests/test_gme.py::TestCgmeLowerBound::test_nonnegative PASSED
+tests/test_gme.py::TestCgmeLowerBound::test_lower_bound_leq_upper_bound PASSED
+tests/test_gradient.py::test_A 
+  TEST A: gradient of C_GME(|psi>) — Level 1 only
+  ----------------------------------------------------------------------
+    trial 1:  C=0.8504  |Re diff|=9.477e-11  |Im diff|=1.047e-10  rel=7.784e-11  ✓
+    trial 2:  C=0.6978  |Re diff|=1.713e-10  |Im diff|=5.743e-11  rel=8.827e-11  ✓
+    trial 3:  C=0.7311  |Re diff|=1.586e-10  |Im diff|=1.485e-10  rel=6.153e-11  ✓
+    trial 4:  C=0.7374  |Re diff|=1.317e-10  |Im diff|=2.322e-10  rel=9.281e-11  ✓
+    trial 5:  C=0.8689  |Re diff|=5.126e-11  |Im diff|=7.105e-11  rel=3.152e-11  ✓
+  Passed: 5/5
+PASSED
+tests/test_gradient.py::test_B 
+  TEST B: dh/dRe U, dh/dIm U — Levels 1 + 2 (Eqs. 10-11)
+  ----------------------------------------------------------------------
+    trial 1:  |Re diff|=1.301e-10  |Im diff|=3.700e-10  rel=6.998e-10  ✓
+    trial 2:  |Re diff|=5.202e-11  |Im diff|=3.003e-11  rel=1.190e-10  ✓
+    trial 3:  |Re diff|=1.394e-10  |Im diff|=7.787e-11  rel=2.855e-10  ✓
+    trial 4:  |Re diff|=7.320e-11  |Im diff|=1.430e-10  rel=2.633e-10  ✓
+    trial 5:  |Re diff|=7.243e-11  |Im diff|=4.660e-11  rel=1.525e-10  ✓
+  Passed: 5/5
+PASSED
+tests/test_gradient.py::test_C 
+  TEST C: full chain — directional derivative on U(k)
+  ----------------------------------------------------------------------
+    trial 1:  ana=+0.049618  num=+0.049618  rel=2.695e-10  ✓
+    trial 2:  ana=-0.018875  num=-0.018875  rel=9.059e-10  ✓
+    trial 3:  ana=+0.079343  num=+0.079343  rel=1.874e-10  ✓
+    trial 4:  ana=+0.049569  num=+0.049569  rel=4.314e-10  ✓
+    trial 5:  ana=-0.042260  num=-0.042260  rel=4.771e-10  ✓
+  Passed: 5/5
+PASSED
+tests/test_gradient.py::test_D 
+  TEST D: focused single-element diagnostic for dh/dU_kl
+  ----------------------------------------------------------------------
+    Setup: n=3, rank=3, k=5, (kk,ll)=(0,0)
+    U[0,0] = -0.783944+0.304087j
+    λ_0 = 0.179147    p_0 = 0.171446    C_GME = 0.880358
+
+    ── dh/dRe U_kl ──
+      term 1: 2 λ Re(U) C_k   = -0.2472765403
+      term 2: phi_R · dm/dpsi = -0.0026398984
+      analytical:               -0.2499164386
+      numerical:                -0.2499164385
+      ratio ana/num:            +1.0000
+
+    ── dh/dIm U_kl ──
+      term 1: 2 λ Im(U) C_k   = +0.0959171053
+      term 2: phi_I · dm/dpsi = +0.0293568388
+      analytical:               +0.1252739441
+      numerical:                +0.1252739441
+      ratio ana/num:            +1.0000
+
+    ── Independent Wirtinger derivation ──
+      dh/dRe wirt:              -0.2499164386
+      dh/dIm wirt:              -0.1252739441
+    (compare both above to 'numerical' line)
+PASSED
+tests/test_gradient.py::test_E 
+  TEST E: gradient at exact bipartition ties (GHZ, W)
+  ----------------------------------------------------------------------
+    GHZ_3 : C=1.000000 (expected 1.000000)  3 active cuts  ||grad - centroid||=1.57e-16  ✓
+    W_3   : C=0.942809 (expected 0.942809)  3 active cuts  ||grad - centroid||=1.57e-16  ✓
+    GHZ_4 : C=1.000000 (expected 1.000000)  7 active cuts  ||grad - centroid||=0.00e+00  ✓
+  Passed: 3/3
+PASSED
+tests/test_gradient.py::test_F 
+  TEST F: end-to-end — separable mixtures give C_GME ≈ 0
+  ----------------------------------------------------------------------
+    classical mix : C_gcg = 0.00e+00  (k=3)  ✓
+    product mixed : C_gcg = 1.78e-07  (k=8)  ✓
+  Passed: 2/2
+PASSED
+tests/test_gradient.py::test_G 
+  TEST G: O(eps^2) scaling of FD error
+  ----------------------------------------------------------------------
+    eps=1e-02   |ana - num| = 1.11e-03
+    eps=1e-03   |ana - num| = 1.11e-05
+    eps=1e-04   |ana - num| = 1.11e-07
+    eps=1e-05   |ana - num| = 1.11e-09
+    eps=1e-06   |ana - num| = 8.51e-11
+    ✓ scaling looks healthy (~O(eps^2))
+PASSED
+tests/test_hamiltonian.py::TestBuildHubbardHamiltonian::test_returns_fermion_operator PASSED
+tests/test_hamiltonian.py::TestBuildHubbardHamiltonian::test_hermitian_sparse_matrix PASSED
+tests/test_hamiltonian.py::TestBuildHubbardHamiltonian::test_nonzero_for_positive_t PASSED
+tests/test_hamiltonian.py::TestBuildHubbardHamiltonian::test_u_only_when_t_zero PASSED
+tests/test_hamiltonian.py::TestBuildHubbardHamiltonian::test_invalid_mode_raises PASSED
+tests/test_hamiltonian.py::TestBuildHubbardHamiltonian::test_all_modes_build[uniform] PASSED
+tests/test_hamiltonian.py::TestBuildHubbardHamiltonian::test_all_modes_build[dimerized] PASSED
+tests/test_hamiltonian.py::TestBuildHubbardHamiltonian::test_all_modes_build[heisenberg] PASSED
+tests/test_hamiltonian.py::TestDiagonalisation::test_returns_five_values PASSED
+tests/test_hamiltonian.py::TestDiagonalisation::test_E0_less_than_E1 PASSED
+tests/test_hamiltonian.py::TestDiagonalisation::test_psi0_normalized PASSED
+tests/test_hamiltonian.py::TestDiagonalisation::test_psi1_normalized PASSED
+tests/test_hamiltonian.py::TestDiagonalisation::test_n_spin_orbitals_correct PASSED
+tests/test_hamiltonian.py::TestDiagonalisation::test_two_site_ground_energy_known PASSED
+tests/test_hamiltonian.py::TestDoubleOccupancyOperator::test_non_interacting_limit PASSED
+tests/test_measure_param.py::test_1_default_unchanged 
+  TEST 1: default behaviour preserved (no measure arg)
+  ----------------------------------------------------------------------
+    Stiefel without measure arg …
+      C = 0.394755   measure = cgme   time = 0.6s
+    GCG without measure arg …
+      C = 0.385733   measure = cgme   time = 2.7s
+    ✓ Both ran without error using default 'cgme'
+PASSED
+tests/test_measure_param.py::test_2_mw_runs 
+  TEST 2: meyerwallach measure runs end-to-end
+  ----------------------------------------------------------------------
+    Stiefel with measure='meyerwallach' …
+      γ = 0.383105   measure = meyerwallach   time = 1.6s
+    GCG with measure='meyerwallach' …
+      γ = 0.383105   measure = meyerwallach   time = 3.5s
+    ✓ Both ran with measure='meyerwallach'
+PASSED
+tests/test_measure_param.py::test_3_pure_state 
+  TEST 3: convex roof on pure state == pure-state value
+  ----------------------------------------------------------------------
+    Pure state γ(|ψ⟩)         = 0.777542
+    Pure state C_GME(|ψ⟩)     = 0.811007
+    MW Stiefel convex roof    = 0.777542   diff from γ = 1.44e-15   ✓
+    MW GCG convex roof        = 0.777542   diff from γ = 1.89e-15   ✓
+    CGME Stiefel convex roof  = 0.811007   diff from C = 1.22e-15   ✓
+PASSED
+tests/test_measure_param.py::test_4_typo_handling 
+  TEST 4: typo in measure arg raises helpful error
+  ----------------------------------------------------------------------
+    ✓ Got ValueError as expected for measure='meyer_wallach'
+    ✓ Got ValueError as expected from the GCG path too
+PASSED
+tests/test_metrics.py::TestPurity::test_pure_state_gives_one PASSED
+tests/test_metrics.py::TestPurity::test_maximally_mixed_gives_half PASSED
+tests/test_metrics.py::TestPurity::test_purity_between_zero_and_one PASSED
+tests/test_metrics.py::TestPurity::test_purity_matches_eigenvalue_sum PASSED
+tests/test_metrics.py::TestEntropy::test_pure_state_gives_zero PASSED
+tests/test_metrics.py::TestEntropy::test_maximally_mixed_gives_log2 PASSED
+tests/test_metrics.py::TestEntropy::test_entropy_nonnegative PASSED
+tests/test_metrics.py::TestHilbertSchmidtDistance::test_identical_states_give_zero PASSED
+tests/test_metrics.py::TestHilbertSchmidtDistance::test_symmetry PASSED
+tests/test_metrics.py::TestHilbertSchmidtDistance::test_nonnegative PASSED
+tests/test_metrics.py::TestHilbertSchmidtDistance::test_known_value PASSED
+tests/test_metrics.py::TestTraceDistance::test_identical_states_give_zero PASSED
+tests/test_metrics.py::TestTraceDistance::test_bounded_by_one PASSED
+tests/test_metrics.py::TestTraceDistance::test_known_value PASSED
+tests/test_metrics.py::TestTraceDistance::test_symmetry PASSED
+tests/test_metrics.py::TestRdmMetrics::test_keys_present PASSED
+tests/test_metrics.py::TestRdmMetrics::test_trace_is_one PASSED
+tests/test_metrics.py::TestRdmMetrics::test_eigvals_length PASSED
+tests/test_meyerwallach.py::test_A_value 
+  TEST A: γ value vs reference implementation
+  ----------------------------------------------------------------------
+    trial 1:  impl = 0.6617568044   ref = 0.6617568044   diff = 0.00e+00   ✓
+    trial 2:  impl = 0.5136322562   ref = 0.5136322562   diff = 0.00e+00   ✓
+    trial 3:  impl = 0.6215643575   ref = 0.6215643575   diff = 0.00e+00   ✓
+    trial 4:  impl = 0.7199196868   ref = 0.7199196868   diff = 0.00e+00   ✓
+    trial 5:  impl = 0.8582029821   ref = 0.8582029821   diff = 0.00e+00   ✓
+    trial 6:  impl = 0.6518238429   ref = 0.6518238429   diff = 0.00e+00   ✓
+    trial 7:  impl = 0.7551904228   ref = 0.7551904228   diff = 0.00e+00   ✓
+    trial 8:  impl = 0.7927645197   ref = 0.7927645197   diff = 0.00e+00   ✓
+    trial 9:  impl = 0.7372578132   ref = 0.7372578132   diff = 0.00e+00   ✓
+    trial 10:  impl = 0.8712274923   ref = 0.8712274923   diff = 0.00e+00   ✓
+  Passed: 10/10
+PASSED
+tests/test_meyerwallach.py::test_B_gradient 
+  TEST B: gradient vs finite differences
+  ----------------------------------------------------------------------
+    trial 1:  γ = 0.8134  |Re diff| = 1.47e-10   |Im diff| = 1.18e-10   rel = 6.45e-11   ✓
+    trial 2:  γ = 0.6735  |Re diff| = 1.56e-10   |Im diff| = 1.79e-10   rel = 6.00e-11   ✓
+    trial 3:  γ = 0.6444  |Re diff| = 1.18e-10   |Im diff| = 2.27e-10   rel = 6.60e-11   ✓
+    trial 4:  γ = 0.9080  |Re diff| = 1.72e-10   |Im diff| = 1.63e-10   rel = 7.26e-11   ✓
+    trial 5:  γ = 0.6902  |Re diff| = 1.45e-10   |Im diff| = 2.52e-10   rel = 7.14e-11   ✓
+  Passed: 5/5
+PASSED
+tests/test_meyerwallach.py::test_C_known_states 
+  TEST C: γ on analytically known states
+  ----------------------------------------------------------------------
+    |GHZ_3>:        γ = 1.000000   (expected 1.000000)   ✓
+    |W_3>:          γ = 0.888889   (expected 0.888889)   ✓
+    |000>:          γ = 0.000000   (expected 0.000000)   ✓
+    Bell ⊗ |0>:    γ = 0.666667   (expected 0.666667)   ✓
+PASSED
+tests/test_mixed_states.py::test_pure_state PASSED
+tests/test_mixed_states.py::test_separable_mixture PASSED
+tests/test_mixed_states.py::test_ghz_plus_minus_mixture PASSED
+tests/test_mixed_states.py::test_cat_state PASSED
+tests/test_mixed_states.py::test_ghz_plus_w_upper_bound PASSED
+tests/test_rdm.py::TestGenerateSiteClusters::test_correct_count PASSED
+tests/test_rdm.py::TestGenerateSiteClusters::test_periodic_boundary PASSED
+tests/test_rdm.py::TestGenerateSiteClusters::test_single_site_clusters_cover_all_sites PASSED
+tests/test_rdm.py::TestComputeGeneralNRDM::test_1rdm_shape PASSED
+tests/test_rdm.py::TestComputeGeneralNRDM::test_2rdm_shape PASSED
+tests/test_rdm.py::TestComputeGeneralNRDM::test_1rdm_trace_positive PASSED
+tests/test_rdm.py::TestComputeGeneralNRDM::test_1rdm_hermitian PASSED
+tests/test_rdm.py::TestPureExcitedRDMs::test_trace_equals_one PASSED
+tests/test_rdm.py::TestPureExcitedRDMs::test_both_hermitian PASSED
+tests/test_rdm.py::TestPureExcitedRDMs::test_eigenvalues_nonnegative PASSED
+tests/test_rdm.py::TestComputeAllPureRdms::test_returns_three_dicts   Computing 1-body RDMs (2 clusters) …
+  Computing 2-body RDMs (2 clusters) …
+PASSED
+tests/test_rdm.py::TestComputeAllPureRdms::test_rdm_pure_has_correct_number_of_entries PASSED
+tests/test_rdm.py::TestComputeAllPureRdms::test_metrics_keys_present PASSED
+tests/test_rdm.py::TestComputeAllPureRdms::test_all_traces_close_to_one PASSED
+tests/test_separable_boundary.py::test_raw_pure_gradient_scales_as_one_over_C PASSED
+tests/test_separable_boundary.py::test_pure_gradient_is_finite_at_the_boundary PASSED
+tests/test_separable_boundary.py::test_final_tangent_gradient_stays_bounded[0.1] PASSED
+tests/test_separable_boundary.py::test_final_tangent_gradient_stays_bounded[0.001] PASSED
+tests/test_separable_boundary.py::test_final_tangent_gradient_stays_bounded[1e-05] PASSED
+tests/test_separable_boundary.py::test_final_tangent_gradient_stays_bounded[1e-08] PASSED
+tests/test_separable_boundary.py::test_final_tangent_gradient_stays_bounded[0.0] PASSED
+tests/test_verification_contract.py::test_project_management_files_exist PASSED
+tests/test_verification_contract.py::test_docs_contain_current_cache_keywords PASSED
+tests/test_verification_contract.py::test_verification_scripts_parse PASSED
+
+======================= 142 passed in 2073.47s (0:34:33) =======================

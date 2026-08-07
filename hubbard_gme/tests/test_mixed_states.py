@@ -66,6 +66,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
 from hubbard_gme.convex_roof import (
     convex_roof_numerical,      # exp(iH) parametrisation
     convex_roof_stiefel,        # Euler-Hurwitz / Algorithm B
+    convex_roof_gcg,            # U(k) GCG / Algorithm A — the PRODUCTION solver
     convex_roof_upper_bound,    # eigendecomposition upper bound
     _cgme_pure_vector,          # direct pure-state formula
 )
@@ -240,8 +241,22 @@ def get_convex_roof_values(rho, n, n_restarts=40):
     )
     C_st = res_st["C_stiefel"]
 
-    # Return both, plus the minimum for reference only (not for pass/fail)
-    return C_num, C_st, min(C_num, C_st)
+    # GCG (Algorithm A) is the solver the production pipeline uses
+    # (--thermal-solver gcg), so it must be exercised here too.
+    res_gcg = convex_roof_gcg(
+        rho, n,
+        n_restarts=n_restarts,
+        tol=1e-12,
+        tol_k=1e-6,
+        k_max_extra=4,
+        verbose=False,
+    )
+    C_gcg = res_gcg["C_gcg"]
+
+    # The convex roof is a MINIMUM, and each solver returns an upper bound on
+    # it, so the smallest of the three is the best estimate. Returned for
+    # reference/display only — correctness checks use the values separately.
+    return C_num, C_st, C_gcg, min(C_num, C_st, C_gcg)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -269,17 +284,20 @@ def run_tests(n_restarts=40, tol_pass=1e-3):
     assert_valid_density_matrix(rho, "Test A: rho_GHZ")
     direct = _cgme_pure_vector(ghz_p, 3)
 
-    C_num, C_st, _ = get_convex_roof_values(rho, 3, n_restarts)
+    C_num, C_st, C_gcg, _ = get_convex_roof_values(rho, 3, n_restarts)
     err_num = abs(C_num - direct)
     err_st  = abs(C_st - direct)
+    err_gcg = abs(C_gcg - direct)
     passed_num = err_num < tol_pass
     passed_st  = err_st < tol_pass
-    passed = passed_num and passed_st
+    passed_gcg = err_gcg < tol_pass
+    passed = passed_num and passed_st and passed_gcg
     all_passed = all_passed and passed
 
     print(f"  Direct formula            = {direct:.8f}")
     print(f"  Exp map (conv_roof_num)   = {C_num:.8f}  Error = {err_num:.2e}  {'✓' if passed_num else '✗'}")
     print(f"  Stiefel (conv_roof_st)    = {C_st:.8f}  Error = {err_st:.2e}  {'✓' if passed_st else '✗'}")
+    print(f"  GCG     (conv_roof_gcg)    = {C_gcg:.8f}  Error = {err_gcg:.2e}  {'✓' if passed_gcg else '✗'}")
     print(f"  Result: {'PASSED ✓' if passed else 'FAILED ✗'}")
 
     # ── Test M1 — Separable diagonal mixture ──────────────────────────────────
@@ -293,18 +311,21 @@ def run_tests(n_restarts=40, tol_pass=1e-3):
                (0.5, ket(1,0,1))])
     assert_valid_density_matrix(rho, "Test M1: rho_separable")
 
-    C_num, C_st, _ = get_convex_roof_values(rho, 3, n_restarts)
+    C_num, C_st, C_gcg, _ = get_convex_roof_values(rho, 3, n_restarts)
     err_num = abs(C_num - 0.0)
     err_st  = abs(C_st - 0.0)
+    err_gcg = abs(C_gcg - 0.0)
     # Looser tolerance for zero targets (optimizer residual)
     passed_num = err_num < 1e-6
     passed_st  = err_st < 1e-6
-    passed = passed_num and passed_st
+    passed_gcg = err_gcg < 1e-6
+    passed = passed_num and passed_st and passed_gcg
     all_passed = all_passed and passed
 
     print(f"  Expected                  = 0.00000000")
     print(f"  Exp map (conv_roof_num)   = {C_num:.8f}  Error = {err_num:.2e}  {'✓' if passed_num else '✗'}")
     print(f"  Stiefel (conv_roof_st)    = {C_st:.8f}  Error = {err_st:.2e}  {'✓' if passed_st else '✗'}")
+    print(f"  GCG     (conv_roof_gcg)    = {C_gcg:.8f}  Error = {err_gcg:.2e}  {'✓' if passed_gcg else '✗'}")
     print(f"  Result: {'PASSED ✓' if passed else 'FAILED ✗'}")
 
     # ── Test M2 — GHZ+/GHZ- mixture (PRIMARY BENCHMARK) ───────────────────────
@@ -329,13 +350,15 @@ def run_tests(n_restarts=40, tol_pass=1e-3):
         rho = mix([(p, ghz_p_state), (1-p, ghz_m_state)])
         assert_valid_density_matrix(rho, f"Test M2 at p={p}")
 
-        C_num, C_st, _ = get_convex_roof_values(rho, 3, n_restarts)
+        C_num, C_st, C_gcg, _ = get_convex_roof_values(rho, 3, n_restarts)
         exp  = abs(2*p - 1)
         err_num = abs(C_num - exp)
         err_st  = abs(C_st - exp)
+        err_gcg = abs(C_gcg - exp)
         ok_num = err_num < tol_pass
         ok_st  = err_st < tol_pass
-        ok = ok_num and ok_st
+        ok_gcg = err_gcg < tol_pass
+        ok = ok_num and ok_st and ok_gcg
         if not ok:
             m2_pass = False
         status = "✓✓" if (ok_num and ok_st) else ("✓✗" if ok_num else ("✗✓" if ok_st else "✗✗"))
@@ -377,13 +400,15 @@ def run_tests(n_restarts=40, tol_pass=1e-3):
         rho = make_cat_state(alpha, gamma)
         assert_valid_density_matrix(rho, f"Test M3 (alpha={alpha}, gamma={gamma})")
 
-        C_num, C_st, _ = get_convex_roof_values(rho, 3, n_restarts)
+        C_num, C_st, C_gcg, _ = get_convex_roof_values(rho, 3, n_restarts)
         exp  = 2 * abs(gamma)
         err_num = abs(C_num - exp)
         err_st  = abs(C_st - exp)
+        err_gcg = abs(C_gcg - exp)
         ok_num = err_num < tol_pass
         ok_st  = err_st < tol_pass
-        ok = ok_num and ok_st
+        ok_gcg = err_gcg < tol_pass
+        ok = ok_num and ok_st and ok_gcg
         if not ok:
             m3_pass = False
         status = "✓✓" if (ok_num and ok_st) else ("✓✗" if ok_num else ("✗✓" if ok_st else "✗✗"))
@@ -412,12 +437,12 @@ def run_tests(n_restarts=40, tol_pass=1e-3):
         assert_valid_density_matrix(rho, f"Test D at p={p}")
 
         ub               = convex_roof_upper_bound(rho, 3)["C_UB"]
-        C_num, C_st, _   = get_convex_roof_values(rho, 3, n_restarts)
+        C_num, C_st, C_gcg, _ = get_convex_roof_values(rho, 3, n_restarts)
 
         # Check both methods separately (not just min)
         ok_num = C_num <= ub + tol_pass
         ok_st  = C_st <= ub + tol_pass
-        ok = ok_num and ok_st
+        ok = ok_num and ok_st and ok_gcg
         if not ok:
             testD_pass = False
         status = "✓✓" if (ok_num and ok_st) else ("✓✗" if ok_num else ("✗✓" if ok_st else "✗✗"))
@@ -447,7 +472,7 @@ def test_pure_state():
     rho    = dm(ghz_p)
     assert_valid_density_matrix(rho, "test_pure_state")
     direct = _cgme_pure_vector(ghz_p, 3)
-    C_num, C_st, _ = get_convex_roof_values(rho, 3, n_restarts=20)
+    C_num, C_st, C_gcg, _ = get_convex_roof_values(rho, 3, n_restarts=20)
     assert abs(C_num - direct) < 1e-3, f"Exp map failed: {C_num} vs {direct}"
     assert abs(C_st - direct) < 1e-3, f"Stiefel failed: {C_st} vs {direct}"
 
@@ -459,7 +484,7 @@ def test_separable_mixture():
                (0.2, ket(0,1,1)),
                (0.5, ket(1,0,1))])
     assert_valid_density_matrix(rho, "test_separable_mixture")
-    C_num, C_st, _ = get_convex_roof_values(rho, 3, n_restarts=20)
+    C_num, C_st, C_gcg, _ = get_convex_roof_values(rho, 3, n_restarts=20)
     assert abs(C_num) < 1e-6, f"Exp map failed: {C_num}"
     assert abs(C_st) < 1e-6, f"Stiefel failed: {C_st}"
 
@@ -472,7 +497,7 @@ def test_ghz_plus_minus_mixture():
     for p in [0.0, 0.25, 0.5, 0.75, 1.0]:
         rho        = mix([(p, ghz_p), (1-p, ghz_m)])
         assert_valid_density_matrix(rho, f"test_ghz_plus_minus_mixture (p={p})")
-        C_num, C_st, _ = get_convex_roof_values(rho, 3, n_restarts=20)
+        C_num, C_st, C_gcg, _ = get_convex_roof_values(rho, 3, n_restarts=20)
         expected   = abs(2*p - 1)
         assert abs(C_num - expected) < 1e-3, \
             f"M2 (exp map) failed at p={p}: got {C_num}, expected {expected}"
@@ -491,7 +516,7 @@ def test_cat_state():
             continue
         rho        = make_cat_state(alpha, gamma)
         assert_valid_density_matrix(rho, f"test_cat_state (alpha={alpha}, gamma={gamma})")
-        C_num, C_st, _ = get_convex_roof_values(rho, 3, n_restarts=20)
+        C_num, C_st, C_gcg, _ = get_convex_roof_values(rho, 3, n_restarts=20)
         expected   = 2 * abs(gamma)
         assert abs(C_num - expected) < 1e-3, \
             f"M3 (exp map) failed at (alpha={alpha}, gamma={gamma}): got {C_num}, expected {expected}"
@@ -509,7 +534,7 @@ def test_ghz_plus_w_upper_bound():
         assert_valid_density_matrix(rho, f"test_ghz_plus_w_upper_bound (p={p})")
         ub         = convex_roof_upper_bound(rho, 3)["C_UB"]
         # Check both methods separately (not just min)
-        C_num, C_st, _ = get_convex_roof_values(rho, 3, n_restarts=20)
+        C_num, C_st, C_gcg, _ = get_convex_roof_values(rho, 3, n_restarts=20)
         assert C_num <= ub + 1e-3, \
             f"Exp map exceeded UB at p={p}: {C_num} > {ub}"
         assert C_st <= ub + 1e-3, \

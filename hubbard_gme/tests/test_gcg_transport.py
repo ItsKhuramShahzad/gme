@@ -2,14 +2,25 @@
 Parallel-transport regressions for the U(k)-GCG solver (audit issue #5).
 
 The GCG step is ``U_new = U @ expm(t*X)`` and ``_gcg_gradient`` returns the
-LEFT-TRIVIALIZED (body) gradient — verified here in ``test_gradient_is_body``.
-In body coordinates the parallel transport of a tangent vector Y along the
-geodesic ``gamma(t) = U exp(tX)`` is
+LEFT-TRIVIALIZED (body) gradient — verified here in
+``test_gradient_is_body_coordinates``. In those coordinates the Levi-Civita
+(parallel) transport of a tangent vector Y along the geodesic
+``gamma(t) = U exp(tX)`` is
 
-    T(Y) = exp(-tX/2) Y exp(+tX/2)
+    T(Y) = exp(-tX/2) Y exp(+tX/2)          i.e.  half_step^dag @ Y @ half_step
 
-i.e. ``half_step.conj().T @ Y @ half_step``.  Applying the inverse adjoint
-action instead corrupts the modified Polak-Ribiere coefficient.
+which is what ``test_transport_is_parallel`` below identifies, by measuring the
+covariant derivative along the geodesic: ~5e-11 for this map against ~1.75 for
+the opposite sign.
+
+NOTE ON WHAT THE SOLVER USES. ``_gcg_optimise_single`` deliberately implements
+the OTHER map, ``exp(+tX/2) Y exp(-tX/2)`` — Eq. (16) of Röthlisberger, Lehmann
+& Loss, PRA 80, 042301 (2009), and Eq. (21) of libCreme. That is an isometric
+*vector* transport rather than the parallel one. Riemannian conjugate-gradient
+theory admits both, and measured on production RDMs the two agree to within
+solver noise, so the implementation follows the published formula. These tests
+therefore document the geometry of both maps; they are not asserting that the
+solver uses the parallel one.
 
 Unlike the older test modules, every check here is an ``assert``.
 """

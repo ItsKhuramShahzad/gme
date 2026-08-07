@@ -284,3 +284,32 @@ class TestFullAnalysis:
                     "status", "lower_bound", "upper_bound", "numerical",
                     "global_purity", "n", "sites"):
             assert key in result
+
+    def test_gcg_is_exercised_and_bracketed(self):
+        """full_convex_roof_analysis runs Stiefel, GCG and Stiefel-GCG.
+
+        GCG is the production solver (--thermal-solver gcg), so assert its
+        value explicitly rather than relying on it only through C_numerical.
+        """
+        rho = _mixed_singlet_triplet(0.7)
+        result = full_convex_roof_analysis(rho, (0, 1), n_restarts=10,
+                                           verbose=False)
+        assert "C_gcg" in result, "GCG did not run inside full_convex_roof_analysis"
+        c_gcg = float(result["C_gcg"])
+        assert np.isfinite(c_gcg), f"C_gcg is not finite: {c_gcg}"
+        assert -1e-9 <= c_gcg <= 1.0 + 1e-9, f"C_gcg out of range [0,1]: {c_gcg}"
+        # every solver returns an upper bound on the same roof, so the reported
+        # C_numerical (the best of them) can never exceed GCG's own value
+        assert float(result["C_numerical"]) <= c_gcg + 1e-9
+        # and the certified lower bound must sit below it
+        assert float(result["C_LB_best"]) <= c_gcg + 1e-4
+
+    def test_gcg_matches_pure_state_value(self):
+        """On a pure rho the only decomposition is the state itself, so the
+        GCG convex roof must reproduce the pure-state formula exactly."""
+        rho = _bell_singlet_rho()
+        result = full_convex_roof_analysis(rho, (0, 1), n_restarts=5,
+                                           verbose=False)
+        exact = _cgme_pure_vector(np.array([0, 1, -1, 0], complex) / np.sqrt(2), 2)
+        assert abs(float(result["C_gcg"]) - exact) < 1e-6, (
+            f"GCG {result['C_gcg']:.8f} != pure-state value {exact:.8f}")

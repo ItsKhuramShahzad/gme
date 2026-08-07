@@ -1416,20 +1416,30 @@ def _gcg_optimise_single(
         # ── 3. New gradient ──
         G_new = _gcg_gradient(U_new, eigvecs, eigvals_sqrt, n, measure  )
 
-        # ── 4. Parallel transport old gradient: T = exp(−tX/2) G exp(+tX/2) ──
-        # The step is U_new = U @ expm(tX), so X and G are expressed in
-        # BODY (left-trivialized) coordinates — verified numerically: the
-        # identity d/dt h(U exp(tY))|_0 = <G, Y> holds for arbitrary
-        # skew-Hermitian Y, and G is exactly skew-Hermitian.
+        # ── 4. Transport the old gradient: T = exp(+tX/2) G exp(−tX/2) ──
+        # This is Eq. (16) of Röthlisberger, Lehmann & Loss, PRA 80, 042301
+        # (2009), and Eq. (21) of libCreme — the published form, which is what
+        # this implementation follows.
         #
-        # In body coordinates the parallel transport along the geodesic
-        # gamma(t) = U exp(tX) is  T(Y) = exp(−tX/2) Y exp(+tX/2).
-        # (Eq. (16) of the paper is the AMBIENT form, exp(+tX/2) Y exp(−tX/2);
-        # applying it to a body vector transports in the wrong direction and
-        # spoils conjugacy.  See tests/test_gcg_transport.py, which measures
-        # the covariant derivative: ~5e-11 for this form vs 1.75 for the other.)
+        # Geometric note. The step is U_new = U @ expm(tX), and `G` is the
+        # gradient in LEFT-TRIVIALIZED (body) coordinates: it is built by
+        # contracting the Euclidean derivative with U (matrices A and S above)
+        # and comes out exactly skew-Hermitian. Verified numerically by the
+        # identity d/dt h(U exp(tY))|_0 = <G, Y> for arbitrary skew-Hermitian Y.
+        # In those coordinates the Levi-Civita (parallel) transport is the
+        # OPPOSITE sign, exp(−tX/2) G exp(+tX/2); measuring the covariant
+        # derivative along the geodesic gives ~5e-11 for that form against 1.75
+        # for the one below, which is what identifies it as the parallel map.
+        #
+        # The published map is nevertheless an isometric VECTOR transport, and
+        # Riemannian conjugate-gradient theory admits both, so no value computed
+        # under either is invalid. Measured on production RDMs the two agree to
+        # within solver noise (differences 1e-14..1e-4, sign varying row to row),
+        # so the default stays with the literature. To switch, replace the line
+        # below with `half_step.conj().T @ G @ half_step`.
+        # See tests/test_gcg_transport.py for the measurements.
         half_step = expm(0.5 * t_new * X)
-        T_transp = half_step.conj().T @ G @ half_step
+        T_transp = half_step @ G @ half_step.conj().T
 
         # ── 5. Modified Polak-Ribière coefficient ──
         denom = _gcg_inner(G, G)
